@@ -12,21 +12,23 @@ go-test:
   script:
     - /usr/local/go/bin/go test ./...
 
-build-openwrt-arm64:
+build-openwrt-release:
   stage: build
   image: golang:1.22-alpine
   needs:
     - go-test
-  variables:
-    GOOS: linux
-    GOARCH: arm64
   script:
     - mkdir -p dist
-    - /usr/local/go/bin/go build -trimpath -ldflags "-s -w" -o dist/sitewatch-linux-arm64 ./cmd/sitewatch
-    - sha256sum dist/sitewatch-linux-arm64 > dist/sitewatch-linux-arm64.sha256
+    - GOOS=linux GOARCH=arm64 /usr/local/go/bin/go build -trimpath -ldflags "-s -w" -o dist/sitewatch-linux-arm64 ./cmd/sitewatch
+    - GOOS=linux GOARCH=arm GOARM=7 /usr/local/go/bin/go build -trimpath -ldflags "-s -w" -o dist/sitewatch-linux-armv7 ./cmd/sitewatch
+    - GOOS=linux GOARCH=arm GOARM=6 /usr/local/go/bin/go build -trimpath -ldflags "-s -w" -o dist/sitewatch-linux-armv6 ./cmd/sitewatch
+    - GOOS=linux GOARCH=amd64 /usr/local/go/bin/go build -trimpath -ldflags "-s -w" -o dist/sitewatch-linux-amd64 ./cmd/sitewatch
+    - GOOS=linux GOARCH=386 /usr/local/go/bin/go build -trimpath -ldflags "-s -w" -o dist/sitewatch-linux-386 ./cmd/sitewatch
+    - GOOS=linux GOARCH=mips GOMIPS=softfloat /usr/local/go/bin/go build -trimpath -ldflags "-s -w" -o dist/sitewatch-linux-mips ./cmd/sitewatch
+    - GOOS=linux GOARCH=mipsle GOMIPS=softfloat /usr/local/go/bin/go build -trimpath -ldflags "-s -w" -o dist/sitewatch-linux-mipsle ./cmd/sitewatch
+    - sha256sum dist/sitewatch-linux-* > dist/SHA256SUMS
   artifacts:
-    name: "sitewatch-openwrt-arm64-$CI_COMMIT_SHORT_SHA"
+    name: "sitewatch-openwrt-release-$CI_COMMIT_SHORT_SHA"
     expire_in: 30 days
     paths:
-      - dist/sitewatch-linux-arm64
-      - dist/sitewatch-linux-arm64.sha256
+      - dist/

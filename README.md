@@ -34,22 +34,42 @@ curl --version
 make build-openwrt-arm64
 ```
 
-Без локального Go можно собрать тем же способом через Docker на этом ПК:
+Релизная сборка для основных архитектур OpenWrt:
+
+```sh
+make build-openwrt-all
+```
+
+Без локального Go можно собрать тем же способом через Docker на этом ПК. По умолчанию собираются все релизные цели:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-openwrt-docker.ps1
 ```
 
-В GitLab включен pipeline `.gitlab-ci.yml`: job `build-openwrt-arm64` собирает такой же бинарник и сохраняет его в artifacts на 30 дней.
+Можно собрать одну архитектуру:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-openwrt-docker.ps1 -Arch arm64
+```
+
+В GitLab включен pipeline `.gitlab-ci.yml`: job `build-openwrt-release` собирает релизный набор и сохраняет `dist/` в artifacts на 30 дней.
 
 Получится:
 
 ```text
 dist/sitewatch-linux-arm64
-dist/sitewatch-linux-arm64.sha256
+dist/sitewatch-linux-armv7
+dist/sitewatch-linux-armv6
+dist/sitewatch-linux-amd64
+dist/sitewatch-linux-386
+dist/sitewatch-linux-mips
+dist/sitewatch-linux-mipsle
+dist/SHA256SUMS
 ```
 
-Установщик положит этот файл в `/usr/bin/sitewatch`, если он есть в `dist/`.
+Для OpenWrt `aarch64_cortex-a53` нужен `sitewatch-linux-arm64`; для `x86_64` нужен `sitewatch-linux-amd64`; для `i386_pentium4` чаще всего нужен `sitewatch-linux-386`; для `arm_cortex-a7_*` подойдет `sitewatch-linux-armv7`; для многих старых MIPS-роутеров используются `sitewatch-linux-mips` или `sitewatch-linux-mipsle`.
+
+Установщик сам выберет подходящий `dist/sitewatch-linux-*` по `uname -m` и `/etc/openwrt_release` и положит его в `/usr/bin/sitewatch`. Если автоопределение не подошло, скопируй нужный бинарник вручную как `/usr/bin/sitewatch`.
 
 ## Установка
 

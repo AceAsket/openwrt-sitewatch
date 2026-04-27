@@ -4,9 +4,29 @@ set -eu
 mkdir -p /etc/sitewatch /usr/bin /www/sitewatch/cgi-bin
 
 cp ./sitewatch.conf /etc/sitewatch/sitewatch.conf
-if [ -f ./dist/sitewatch-linux-arm64 ]; then
+
+arch="$(uname -m 2>/dev/null || true)"
+openwrt_arch=""
+[ -f /etc/openwrt_release ] && . /etc/openwrt_release && openwrt_arch="${DISTRIB_ARCH:-}"
+sitewatch_binary=""
+case "$openwrt_arch:$arch" in
+	aarch64_*:*|*:aarch64) sitewatch_binary="./dist/sitewatch-linux-arm64" ;;
+	x86_64:*|*:x86_64) sitewatch_binary="./dist/sitewatch-linux-amd64" ;;
+	i386_*:*|i486_*:*|i686_*:*|*:i386|*:i486|*:i586|*:i686) sitewatch_binary="./dist/sitewatch-linux-386" ;;
+	arm_*:armv7*|arm_*:armv8*|*:armv7*) sitewatch_binary="./dist/sitewatch-linux-armv7" ;;
+	arm_*:armv6*|*:armv6*) sitewatch_binary="./dist/sitewatch-linux-armv6" ;;
+	mipsel_*:*|*:mipsel) sitewatch_binary="./dist/sitewatch-linux-mipsle" ;;
+	mips_*:*|*:mips) sitewatch_binary="./dist/sitewatch-linux-mips" ;;
+esac
+
+if [ -n "$sitewatch_binary" ] && [ -f "$sitewatch_binary" ]; then
+	cp "$sitewatch_binary" /usr/bin/sitewatch
+	chmod +x /usr/bin/sitewatch
+	echo "Installed Go binary: $sitewatch_binary"
+elif [ -f ./dist/sitewatch-linux-arm64 ]; then
 	cp ./dist/sitewatch-linux-arm64 /usr/bin/sitewatch
 	chmod +x /usr/bin/sitewatch
+	echo "Installed fallback Go binary: ./dist/sitewatch-linux-arm64"
 fi
 cp ./files/usr/bin/sitewatch-collect /usr/bin/sitewatch-collect
 cp ./files/usr/bin/sitewatch-capture /usr/bin/sitewatch-capture
@@ -33,4 +53,4 @@ fi
 
 echo "Installed. Open: http://<router-ip>:8095/cgi-bin/sitewatch"
 echo "Needed packages for shell fallback and Pi-hole API: curl ca-bundle."
-echo "If dist/sitewatch-linux-arm64 was present, scan/check-url use /usr/bin/sitewatch without curl."
+echo "If a matching dist/sitewatch-linux-* binary was present, scan/check-url use /usr/bin/sitewatch without curl."
