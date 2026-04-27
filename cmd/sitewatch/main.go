@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -29,6 +30,7 @@ type config struct {
 	ScanStatus      string
 	Proxy           string
 	Batch           int
+	Workers         int
 	Timeout         time.Duration
 	MinRescan       time.Duration
 	SlowSeconds     float64
@@ -151,6 +153,7 @@ func loadConfig() config {
 		ScanStatus:      getStr(values, "SITEWATCH_SCAN_STATUS", "/tmp/sitewatch-scan.status"),
 		Proxy:           getStr(values, "SITEWATCH_PROXY", "socks5h://127.0.0.1:20170"),
 		Batch:           getInt(values, "SITEWATCH_BATCH", 12),
+		Workers:         getInt(values, "SITEWATCH_SCAN_WORKERS", 4),
 		Timeout:         time.Duration(getInt(values, "SITEWATCH_TIMEOUT", 7)) * time.Second,
 		MinRescan:       time.Duration(getInt(values, "SITEWATCH_MIN_RESCAN", 86400)) * time.Second,
 		SlowSeconds:     getFloat(values, "SITEWATCH_SLOW_SECONDS", 5),
@@ -315,49 +318,81 @@ func cmdScan(cfg config) error {
 		return nil
 	}
 
-	for idx, item := range domains {
-		writeScanStatus(cfg, "running", now, len(domains), idx, item.Domain)
-		result, err := checkURL(cfg, "https://"+item.Domain+"/", false)
-		if err != nil {
-			continue
-		}
-		results[result.Domain] = resultEntry{
-			Domain:     result.Domain,
-			Source:     item.Source,
-			Count:      item.Count,
-			Status:     result.Status,
-			DirectCode: result.Direct.Code,
-			DirectTime: fmt.Sprintf("%.6f", result.Direct.Time),
-			ProxyCode:  result.Proxy.Code,
-			ProxyTime:  fmt.Sprintf("%.6f", result.Proxy.Time),
-			Scanned:    now,
-			DPIStatus:  dpiSummary(result.DPI),
-		}
-		maybeAddProxyDomain(cfg, result.Domain, result.Status)
+	workers := cfg.Workers
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > len(domains) {
+		workers = len(domains)
+	}
+	jobs := make(chan seenEntry)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	done := 0
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range jobs {
+				mu.Lock()
+				writeScanStatus(cfg, "running", now, len(domains), done, item.Domain)
+				mu.Unlock()
 
-		if cfg.CheckBaseDomain && (result.Status == "blocked" || result.Status == "slow") {
-			base := baseDomain(result.Domain)
-			if base != "" && base != result.Domain {
-				baseResult, err := checkURL(cfg, "https://"+base+"/", false)
+				result, err := checkURL(cfg, "https://"+item.Domain+"/", false)
 				if err == nil {
-					results[baseResult.Domain] = resultEntry{
-						Domain:     baseResult.Domain,
+					mu.Lock()
+					results[result.Domain] = resultEntry{
+						Domain:     result.Domain,
 						Source:     item.Source,
 						Count:      item.Count,
-						Status:     baseResult.Status,
-						DirectCode: baseResult.Direct.Code,
-						DirectTime: fmt.Sprintf("%.6f", baseResult.Direct.Time),
-						ProxyCode:  baseResult.Proxy.Code,
-						ProxyTime:  fmt.Sprintf("%.6f", baseResult.Proxy.Time),
+						Status:     result.Status,
+						DirectCode: result.Direct.Code,
+						DirectTime: fmt.Sprintf("%.6f", result.Direct.Time),
+						ProxyCode:  result.Proxy.Code,
+						ProxyTime:  fmt.Sprintf("%.6f", result.Proxy.Time),
 						Scanned:    now,
-						DPIStatus:  dpiSummary(baseResult.DPI),
+						DPIStatus:  dpiSummary(result.DPI),
 					}
-					maybeAddProxyDomain(cfg, baseResult.Domain, baseResult.Status)
+					maybeAddProxyDomain(cfg, result.Domain, result.Status)
+					mu.Unlock()
+
+					if cfg.CheckBaseDomain && (result.Status == "blocked" || result.Status == "slow") {
+						base := baseDomain(result.Domain)
+						if base != "" && base != result.Domain {
+							baseResult, err := checkURL(cfg, "https://"+base+"/", false)
+							if err == nil {
+								mu.Lock()
+								results[baseResult.Domain] = resultEntry{
+									Domain:     baseResult.Domain,
+									Source:     item.Source,
+									Count:      item.Count,
+									Status:     baseResult.Status,
+									DirectCode: baseResult.Direct.Code,
+									DirectTime: fmt.Sprintf("%.6f", baseResult.Direct.Time),
+									ProxyCode:  baseResult.Proxy.Code,
+									ProxyTime:  fmt.Sprintf("%.6f", baseResult.Proxy.Time),
+									Scanned:    now,
+									DPIStatus:  dpiSummary(baseResult.DPI),
+								}
+								maybeAddProxyDomain(cfg, baseResult.Domain, baseResult.Status)
+								mu.Unlock()
+							}
+						}
+					}
 				}
+
+				mu.Lock()
+				done++
+				writeScanStatus(cfg, "running", now, len(domains), done, item.Domain)
+				mu.Unlock()
 			}
-		}
-		writeScanStatus(cfg, "running", now, len(domains), idx+1, item.Domain)
+		}()
 	}
+	for _, item := range domains {
+		jobs <- item
+	}
+	close(jobs)
+	wg.Wait()
 
 	if err := writeResults(cfg.Results, results); err != nil {
 		writeScanStatus(cfg, "error", now, len(domains), len(domains), "")
