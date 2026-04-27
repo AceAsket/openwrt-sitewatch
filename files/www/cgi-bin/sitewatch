@@ -64,11 +64,11 @@ print_proxy_domains() {
 
 status_label() {
 	case "$1" in
-		blocked) echo "Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ" ;;
-		slow) echo "Р·Р°РјРµРґР»РµРЅ" ;;
-		ok) echo "РЅРѕСЂРјР°" ;;
+		blocked) echo "заблокирован" ;;
+		slow) echo "замедлен" ;;
+		ok) echo "норма" ;;
 		proxy_failed) echo "proxy fail" ;;
-		unchecked) echo "РѕР¶РёРґР°РµС‚" ;;
+		unchecked) echo "ожидает" ;;
 		*) echo "$1" ;;
 	esac
 }
@@ -151,11 +151,11 @@ failed_count="$(awk -F '\t' -v source_filter="$source_filter" '$4 == "proxy_fail
 unchecked_count=$((total_seen - total_results))
 [ "$unchecked_count" -lt 0 ] && unchecked_count=0
 last_scan="$(awk -F '\t' -v source_filter="$source_filter" 'BEGIN{m=0} (source_filter == "" || $2 == source_filter) && $9>m{m=$9} END{print m}' "$SITEWATCH_RESULTS" 2>/dev/null)"
-[ -n "$last_scan" ] && [ "$last_scan" != "0" ] && last_scan="$(date -d "@$last_scan" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last_scan")" || last_scan="РЅРµС‚ РґР°РЅРЅС‹С…"
+[ -n "$last_scan" ] && [ "$last_scan" != "0" ] && last_scan="$(date -d "@$last_scan" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last_scan")" || last_scan="нет данных"
 dns_logging="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
 capture_status="$(cat "$SITEWATCH_CAPTURE_STATUS" 2>/dev/null || true)"
-capture_text="DNS-Р»РѕРіРёСЂРѕРІР°РЅРёРµ РІС‹РєР»СЋС‡РµРЅРѕ"
-[ "$dns_logging" = "1" ] && capture_text="DNS-Р»РѕРіРёСЂРѕРІР°РЅРёРµ РІРєР»СЋС‡РµРЅРѕ"
+capture_text="DNS-логирование выключено"
+[ "$dns_logging" = "1" ] && capture_text="DNS-логирование включено"
 capture_state=""
 capture_time=""
 capture_duration=""
@@ -167,10 +167,10 @@ if [ -n "$capture_status" ]; then
 	capture_duration="$(printf "%s" "$capture_status" | awk -F '\t' '{print $3}')"
 	capture_last="$(printf "%s" "$capture_status" | awk -F '\t' '{print $4}')"
 	capture_when="$(date -d "@$capture_time" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$capture_time")"
-	[ "$capture_state" = "done" ] && capture_text="РџРѕСЃР»РµРґРЅРµРµ РѕРєРЅРѕ: $capture_duration СЃРµРє, $capture_when"
-	[ "$capture_state" = "running" ] && capture_text="РРґРµС‚ РѕРєРЅРѕ РЅР°Р±Р»СЋРґРµРЅРёСЏ: $capture_duration СЃРµРє"
-	[ "$capture_state" = "running" ] && [ "$capture_duration" = "0" ] && capture_text="РРґРµС‚ live-РЅР°Р±Р»СЋРґРµРЅРёРµ Р±РµР· С‚Р°Р№РјРµСЂР°"
-	[ "$capture_state" = "stopped" ] && capture_text="Live-РЅР°Р±Р»СЋРґРµРЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ: $capture_when"
+	[ "$capture_state" = "done" ] && capture_text="Последнее окно: $capture_duration сек, $capture_when"
+	[ "$capture_state" = "running" ] && capture_text="Идет окно наблюдения: $capture_duration сек"
+	[ "$capture_state" = "running" ] && [ "$capture_duration" = "0" ] && capture_text="Идет live-наблюдение без таймера"
+	[ "$capture_state" = "stopped" ] && capture_text="Live-наблюдение остановлено: $capture_when"
 	if [ "$capture_state" = "running" ] && [ "$capture_duration" != "0" ]; then
 		now_for_remaining="$(date +%s)"
 		capture_remaining=$((capture_time + capture_duration - now_for_remaining))
@@ -198,7 +198,7 @@ pihole_label="Pi-hole API выключен"
 pihole_label_e="$(printf "%s" "$pihole_label" | html_escape)"
 pihole_url_e="$(printf "%s" "$pihole_url_label" | html_escape)"
 
-source_title="Р’СЃРµ СѓСЃС‚СЂРѕР№СЃС‚РІР°"
+source_title="Все устройства"
 [ -n "$source_filter" ] && source_title="$source_filter"
 source_title_e="$(printf "%s" "$source_title" | html_escape)"
 source_filter_e="$(printf "%s" "$source_filter" | html_escape)"
@@ -272,60 +272,60 @@ button.button{font:inherit;cursor:pointer}
 <body>
 <main>
 <section class="top">
-<div class="brand"><div class="mark">SW</div><div><h1>SiteWatch</h1><div class="subtitle">РњРѕРЅРёС‚РѕСЂРёРЅРі Р±Р»РѕРєРёСЂРѕРІРѕРє РїРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР°Рј Р±РµР· РїРѕСЃС‚РѕСЏРЅРЅРѕРіРѕ DNS-Р»РѕРіРёСЂРѕРІР°РЅРёСЏ</div></div></div>
+<div class="brand"><div class="mark">SW</div><div><h1>SiteWatch</h1><div class="subtitle">Мониторинг блокировок по устройствам без постоянного DNS-логирования</div></div></div>
 <div class="actions">
 <button class="button" id="themeToggle" type="button">Dark</button>
 </div>
 </section>
 
 <section class="capture-banner ${capture_state:-idle}" id="captureBanner" data-state="$capture_state" data-start="$capture_time" data-duration="$capture_duration" data-remaining="$capture_remaining">
-<div class="capture-left"><span class="pulse"></span><div><b id="captureTitle">$capture_text</b><div class="muted" id="captureDetail">РќРѕРІС‹Рµ DNS-Р·Р°РїСЂРѕСЃС‹ РїРѕРґС…РІР°С‚С‹РІР°СЋС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РІРѕ РІСЂРµРјСЏ Р°РєС‚РёРІРЅРѕРіРѕ РѕРєРЅР°.</div></div></div>
+<div class="capture-left"><span class="pulse"></span><div><b id="captureTitle">$capture_text</b><div class="muted" id="captureDetail">Новые DNS-запросы подхватываются автоматически во время активного окна.</div></div></div>
 <div>
 <div class="capture-meta"><span class="timer" id="captureTimer">${capture_remaining:-}</span> <span class="live-tag" id="captureMode">${capture_state:-idle}</span></div>
 <div class="capture-actions">
-<a class="button warn" href="?action=capture&duration=45$source_q">45 СЃРµРє</a>
+<a class="button warn" href="?action=capture&duration=45$source_q">45 сек</a>
 <a class="button warn" href="?action=capture_live$source_q">Live</a>
-<a class="button danger" href="?action=capture_stop$source_q">РЎС‚РѕРї</a>
+<a class="button danger" href="?action=capture_stop$source_q">Стоп</a>
 </div>
 </div>
 </section>
 
 <section class="toolbar">
 <div class="tool">
-<div class="tool-title">РџСЂРѕРІРµСЂРєР° СѓСЃС‚СЂРѕР№СЃС‚РІР°</div>
+<div class="tool-title">Проверка устройства</div>
 <form method="get" action="/cgi-bin/sitewatch">
 <input type="hidden" name="action" value="scan">
-<label>РСЃС‚РѕС‡РЅРёРє</label>
+<label>Источник</label>
 <input name="source" value="$source_filter_e" placeholder="192.168.50.105">
-<button class="button primary" type="submit">РЎРєР°РЅРёСЂРѕРІР°С‚СЊ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ</button>
-<a class="button" href="/cgi-bin/sitewatch">РЎР±СЂРѕСЃРёС‚СЊ С„РёР»СЊС‚СЂ</a>
+<button class="button primary" type="submit">Сканировать устройство</button>
+<a class="button" href="/cgi-bin/sitewatch">Сбросить фильтр</a>
 </form>
 <div class="capture">$capture_text</div>
 </div>
 <div class="tool">
-<div class="tool-title">РћРєРЅРѕ РЅР°Р±Р»СЋРґРµРЅРёСЏ</div>
+<div class="tool-title">Окно наблюдения</div>
 <form method="get" action="/cgi-bin/sitewatch">
 <input type="hidden" name="action" value="capture">
-<select name="duration"><option value="30">30 СЃРµРє</option><option value="45" selected>45 СЃРµРє</option><option value="90">90 СЃРµРє</option><option value="180">180 СЃРµРє</option><option value="300">300 СЃРµРє</option></select>
-<button class="button warn" type="submit">Р—Р°РїСѓСЃС‚РёС‚СЊ</button>
+<select name="duration"><option value="30">30 сек</option><option value="45" selected>45 сек</option><option value="90">90 сек</option><option value="180">180 сек</option><option value="300">300 сек</option></select>
+<button class="button warn" type="submit">Запустить</button>
 </form>
 </div>
 </section>
 
 <section class="summary">
-<div class="stat wide"><div class="k">Р¤РёР»СЊС‚СЂ / РїРѕСЃР»РµРґРЅРёР№ СЃРєР°РЅ</div><span class="v" id="summaryScope">$source_title_e В· $last_scan</span></div>
-<div class="stat"><div class="k">DNS-Р·Р°РїСЂРѕСЃРѕРІ</div><span class="v" id="summarySeen">$total_seen</span></div>
-<div class="stat"><div class="k">РџСЂРѕРІРµСЂРµРЅРѕ</div><span class="v" id="summaryResults">$total_results</span></div>
-<div class="stat"><div class="k">VPN-СЃРїРёСЃРѕРє</div><span class="v">$total_proxy</span></div>
-<div class="stat"><div class="k">РћР¶РёРґР°РµС‚</div><span class="v">$unchecked_count</span></div>
+<div class="stat wide"><div class="k">Фильтр / последний скан</div><span class="v" id="summaryScope">$source_title_e · $last_scan</span></div>
+<div class="stat"><div class="k">DNS-запросов</div><span class="v" id="summarySeen">$total_seen</span></div>
+<div class="stat"><div class="k">Проверено</div><span class="v" id="summaryResults">$total_results</span></div>
+<div class="stat"><div class="k">VPN-список</div><span class="v">$total_proxy</span></div>
+<div class="stat"><div class="k">Ожидает</div><span class="v">$unchecked_count</span></div>
 </section>
 
 <section class="health">
-<div class="pill-card"><span><span class="dot blocked"></span>Р—Р°Р±Р»РѕРєРёСЂРѕРІР°РЅС‹</span><b>$blocked_count</b></div>
-<div class="pill-card"><span><span class="dot slow"></span>Р—Р°РјРµРґР»РµРЅС‹</span><b>$slow_count</b></div>
-<div class="pill-card"><span><span class="dot ok"></span>РќРѕСЂРјР°</span><b>$ok_count</b></div>
+<div class="pill-card"><span><span class="dot blocked"></span>Заблокированы</span><b>$blocked_count</b></div>
+<div class="pill-card"><span><span class="dot slow"></span>Замедлены</span><b>$slow_count</b></div>
+<div class="pill-card"><span><span class="dot ok"></span>Норма</span><b>$ok_count</b></div>
 <div class="pill-card"><span><span class="dot proxy_failed"></span>Proxy fail</span><b>$failed_count</b></div>
-<div class="pill-card"><span><span class="dot unchecked"></span>РћР¶РёРґР°СЋС‚</span><b>$unchecked_count</b></div>
+<div class="pill-card"><span><span class="dot unchecked"></span>Ожидают</span><b>$unchecked_count</b></div>
 </section>
 
 <section class="source-panel">
@@ -345,17 +345,17 @@ button.button{font:inherit;cursor:pointer}
 </section>
 
 <section class="export-panel">
-<div class="tool-title">Р’С‹РіСЂСѓР·РєР° РїСЂР°РІРёР»</div>
+<div class="tool-title">Выгрузка правил</div>
 <div class="export-grid">
-<a class="button" href="?action=export">domain: СЃРїРёСЃРѕРє</a>
-<a class="button" href="?action=export_base">Р‘Р°Р·РѕРІС‹Рµ РґРѕРјРµРЅС‹</a>
+<a class="button" href="?action=export">domain: список</a>
+<a class="button" href="?action=export_base">Базовые домены</a>
 <a class="button" href="?action=export_v2raya">v2rayA rules</a>
 <a class="button" href="?action=export_v2raya_base">v2rayA base</a>
 </div>
 </section>
 
 <nav class="sources">
-<a class="chip" href="/cgi-bin/sitewatch">Р’СЃРµ СѓСЃС‚СЂРѕР№СЃС‚РІР°</a>
+<a class="chip" href="/cgi-bin/sitewatch">Все устройства</a>
 EOF
 
 awk -F '\t' '{
@@ -375,9 +375,9 @@ cat <<EOF
 </nav>
 
 <section class="panel">
-<div class="panel-head"><div class="panel-title">Р”РѕРјРµРЅС‹: $source_title_e</div><div class="hint">РЎС‚СЂР°РЅРёС†Р° РѕР±РЅРѕРІР»СЏРµС‚СЃСЏ СЂР°Р· РІ 2 РјРёРЅСѓС‚С‹</div></div>
+<div class="panel-head"><div class="panel-title">Домены: $source_title_e</div><div class="hint">Live-режим обновляет счетчики без перезагрузки страницы</div></div>
 <table>
-<thead><tr><th>РЎС‚Р°С‚СѓСЃ</th><th>Р”РѕРјРµРЅ</th><th>РСЃС‚РѕС‡РЅРёРє</th><th>Р—Р°РїСЂРѕСЃРѕРІ</th><th>РќР°РїСЂСЏРјСѓСЋ</th><th>Р§РµСЂРµР· v2rayA</th><th>РЎРєР°РЅ</th></tr></thead>
+<thead><tr><th>Статус</th><th>Домен</th><th>Источник</th><th>Запросов</th><th>Напрямую</th><th>Через v2rayA</th><th>Скан</th></tr></thead>
 <tbody>
 EOF
 
@@ -407,7 +407,7 @@ awk -F '\t' -v source_filter="$source_filter" '
 )"
 
 if [ -z "$rows" ]; then
-	printf '<tr><td class="empty" colspan="7">РќРµС‚ РґР°РЅРЅС‹С… РґР»СЏ РІС‹Р±СЂР°РЅРЅРѕРіРѕ РёСЃС‚РѕС‡РЅРёРєР°. Р—Р°РїСѓСЃС‚Рё РѕРєРЅРѕ РЅР°Р±Р»СЋРґРµРЅРёСЏ Рё РѕС‚РєСЂРѕР№ РЅСѓР¶РЅС‹Р№ СЃР°Р№С‚ СЃ СѓСЃС‚СЂРѕР№СЃС‚РІР°.</td></tr>\n'
+	printf '<tr><td class="empty" colspan="7">Нет данных для выбранного источника. Запусти окно наблюдения и открой нужный сайт с устройства.</td></tr>\n'
 else
 	printf "%s\n" "$rows" | while IFS="$(printf '\t')" read -r status domain source count direct proxy scanned; do
 		[ -n "$domain" ] || continue
