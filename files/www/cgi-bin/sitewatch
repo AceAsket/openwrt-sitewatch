@@ -299,7 +299,9 @@ cat <<EOF
 <title>SiteWatch</title>
 <script>
 (function(){
-  var saved = localStorage.getItem('sitewatch-theme');
+  var params = new URLSearchParams(window.location.search);
+  var requested = params.get('theme');
+  var saved = requested === 'light' || requested === 'dark' ? requested : localStorage.getItem('sitewatch-theme');
   var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
 })();
@@ -550,7 +552,9 @@ cat <<'EOF'
 (function(){
   var root = document.documentElement;
   var button = document.getElementById('themeToggle');
-  var saved = localStorage.getItem('sitewatch-theme');
+  var params = new URLSearchParams(window.location.search);
+  var requested = params.get('theme');
+  var saved = requested === 'light' || requested === 'dark' ? requested : localStorage.getItem('sitewatch-theme');
   var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   function apply(theme){
     root.setAttribute('data-theme', theme);
