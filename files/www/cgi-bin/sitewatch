@@ -33,6 +33,7 @@ safe_token() {
 url_decode_light() {
 	printf "%s" "$1" | sed \
 		-e 's/+/ /g' \
+		-e 's/%20/ /Ig' \
 		-e 's/%3A/:/Ig' \
 		-e 's/%2F/\//Ig' \
 		-e 's/%3F/?/Ig' \
@@ -40,6 +41,17 @@ url_decode_light() {
 		-e 's/%26/\&/Ig' \
 		-e 's/%23/#/Ig' \
 		-e 's/%25/%/Ig' \
+		-e 's/%22/"/Ig' \
+		-e "s/%27/'/Ig" \
+		-e 's/%28/(/Ig' \
+		-e 's/%29/)/Ig' \
+		-e 's/%2C/,/Ig' \
+		-e 's/%3B/;/Ig' \
+		-e 's/%3C/</Ig' \
+		-e 's/%3E/>/Ig' \
+		-e 's/%5B/[/Ig' \
+		-e 's/%5D/]/Ig' \
+		-e 's/%60/`/Ig' \
 		-e 's/%2E/./Ig' \
 		-e 's/%2D/-/Ig' \
 		-e 's/%5F/_/Ig' \
@@ -683,8 +695,21 @@ cat <<'EOF'
     result.appendChild(metric('VPN-список', data.added || data.error || 'no'));
   }
 
+  function cleanManualInput(value){
+    var raw = String(value || '').replace(/\s+/g, '').replace(/^[ "'`<>\[\]{}(),;]+|[ "'`<>\[\]{}(),;]+$/g, '');
+    var idx = raw.toLowerCase().indexOf('domain:');
+    if (idx >= 0) {
+      raw = raw.slice(idx + 7).replace(/^[ "'`<>\[\]{}(),;]+/, '');
+      var match = raw.match(/^[A-Za-z0-9.-]+/);
+      raw = match ? match[0] : '';
+    }
+    return raw;
+  }
+
   form.addEventListener('submit', function(event){
     event.preventDefault();
+    var input = form.querySelector('input[name="url"]');
+    if (input) input.value = cleanManualInput(input.value);
     var params = new URLSearchParams(new FormData(form));
     params.set('action', 'manual_check_api');
     panel.classList.add('loading');

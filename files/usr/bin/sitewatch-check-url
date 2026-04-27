@@ -26,6 +26,23 @@ case "${1:-}" in
 esac
 
 input="${1:-}"
+input="$(printf "%s" "$input" \
+	| tr -d '[:space:]' \
+	| sed "s/^[\"'\\\`<>()\\[\\]{},;]*//; s/[\"'\\\`<>()\\[\\]{},;]*$//" \
+	| awk '
+	{
+		line = $0;
+		low = tolower(line);
+		pos = index(low, "domain:");
+		if (pos > 0) {
+			line = substr(line, pos + 7);
+			gsub(/^[^A-Za-z0-9.-]+/, "", line);
+			if (match(line, /^[A-Za-z0-9.-]+/)) line = substr(line, RSTART, RLENGTH);
+			else line = "";
+		}
+		print line;
+	}
+')"
 
 html_url="$input"
 case "$input" in

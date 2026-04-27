@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type config struct {
@@ -340,7 +341,7 @@ func checkURL(cfg config, input string, add bool) (checkResult, error) {
 }
 
 func normalizeURL(input string) (string, string, error) {
-	raw := strings.TrimSpace(input)
+	raw := cleanManualInput(input)
 	if raw == "" {
 		return "", "", errors.New("empty_url")
 	}
@@ -359,6 +360,30 @@ func normalizeURL(input string) (string, string, error) {
 		return "", host, errors.New("bad_domain")
 	}
 	return parsed.String(), host, nil
+}
+
+func cleanManualInput(input string) string {
+	raw := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(input))
+	raw = strings.Trim(raw, `"'`+"`"+`<>[]{}(),;`)
+
+	if idx := strings.Index(strings.ToLower(raw), "domain:"); idx >= 0 {
+		raw = raw[idx+len("domain:"):]
+		raw = strings.Trim(raw, `"'`+"`"+`<>[]{}(),;`)
+		for i, r := range raw {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
+				continue
+			}
+			raw = raw[:i]
+			break
+		}
+	}
+
+	return raw
 }
 
 func validDomain(host string) bool {
