@@ -1,0 +1,258 @@
+#!/bin/ash
+
+CONF="/etc/sitewatch/sitewatch.conf"
+[ -f "$CONF" ] && . "$CONF"
+
+: "${SITEWATCH_SEEN:=/etc/sitewatch/seen.tsv}"
+: "${SITEWATCH_RESULTS:=/etc/sitewatch/results.tsv}"
+: "${SITEWATCH_PROXY_OUT:=/etc/sitewatch/proxy-domains.txt}"
+: "${SITEWATCH_SCAN_BIN:=/usr/bin/sitewatch-scan}"
+: "${SITEWATCH_COLLECT_BIN:=/usr/bin/sitewatch-collect}"
+: "${SITEWATCH_CAPTURE_BIN:=/usr/bin/sitewatch-capture}"
+: "${SITEWATCH_CAPTURE_STATUS:=/tmp/sitewatch-capture.status}"
+
+html_escape() {
+	sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
+}
+
+param() {
+	key="$1"
+	printf "%s" "${QUERY_STRING:-}" | tr '&' '\n' | awk -F '=' -v k="$key" '$1 == k { print $2; exit }'
+}
+
+safe_token() {
+	printf "%s" "$1" | sed 's/%2E/./g; s/%2e/./g' | awk '/^[A-Za-z0-9_.:-]+$/ { print; exit }'
+}
+
+status_label() {
+	case "$1" in
+		blocked) echo "заблокирован" ;;
+		slow) echo "замедлен" ;;
+		ok) echo "норма" ;;
+		proxy_failed) echo "proxy fail" ;;
+		unchecked) echo "ожидает" ;;
+		*) echo "$1" ;;
+	esac
+}
+
+action="$(param action)"
+source_filter="$(safe_token "$(param source)")"
+duration="$(safe_token "$(param duration)")"
+[ -n "$duration" ] || duration=45
+source_q=""
+[ -n "$source_filter" ] && source_q="&source=$source_filter"
+
+case "$action" in
+	capture)
+		"$SITEWATCH_CAPTURE_BIN" "$duration" >/dev/null 2>&1
+		;;
+	collect)
+		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
+		;;
+	scan)
+		if [ -n "$source_filter" ]; then
+			SITEWATCH_SOURCE_FILTER="$source_filter" SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1
+		else
+			SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1
+		fi
+		;;
+	export)
+		printf "Content-Type: text/plain; charset=utf-8\r\n"
+		printf "Content-Disposition: attachment; filename=\"proxy-domains.txt\"\r\n\r\n"
+		[ -f "$SITEWATCH_PROXY_OUT" ] && cat "$SITEWATCH_PROXY_OUT"
+		exit 0
+		;;
+esac
+
+filter_awk='1'
+[ -n "$source_filter" ] && filter_awk='$2 == source_filter'
+
+total_seen="$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $1 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_SEEN" 2>/dev/null)"
+total_results="$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $2 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
+total_proxy="$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
+blocked_count="$(awk -F '\t' -v source_filter="$source_filter" '$4 == "blocked" && (source_filter == "" || $2 == source_filter) { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
+slow_count="$(awk -F '\t' -v source_filter="$source_filter" '$4 == "slow" && (source_filter == "" || $2 == source_filter) { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
+ok_count="$(awk -F '\t' -v source_filter="$source_filter" '$4 == "ok" && (source_filter == "" || $2 == source_filter) { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
+failed_count="$(awk -F '\t' -v source_filter="$source_filter" '$4 == "proxy_failed" && (source_filter == "" || $2 == source_filter) { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
+unchecked_count=$((total_seen - total_results))
+[ "$unchecked_count" -lt 0 ] && unchecked_count=0
+last_scan="$(awk -F '\t' -v source_filter="$source_filter" 'BEGIN{m=0} (source_filter == "" || $2 == source_filter) && $9>m{m=$9} END{print m}' "$SITEWATCH_RESULTS" 2>/dev/null)"
+[ -n "$last_scan" ] && [ "$last_scan" != "0" ] && last_scan="$(date -d "@$last_scan" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last_scan")" || last_scan="нет данных"
+dns_logging="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
+capture_status="$(cat "$SITEWATCH_CAPTURE_STATUS" 2>/dev/null || true)"
+capture_text="DNS-логирование выключено"
+[ "$dns_logging" = "1" ] && capture_text="DNS-логирование включено"
+if [ -n "$capture_status" ]; then
+	capture_state="$(printf "%s" "$capture_status" | awk -F '\t' '{print $1}')"
+	capture_time="$(printf "%s" "$capture_status" | awk -F '\t' '{print $2}')"
+	capture_duration="$(printf "%s" "$capture_status" | awk -F '\t' '{print $3}')"
+	capture_when="$(date -d "@$capture_time" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$capture_time")"
+	[ "$capture_state" = "done" ] && capture_text="Последнее окно: $capture_duration сек, $capture_when"
+	[ "$capture_state" = "running" ] && capture_text="Идет окно наблюдения: $capture_duration сек"
+fi
+
+source_title="Все устройства"
+[ -n "$source_filter" ] && source_title="$source_filter"
+source_title_e="$(printf "%s" "$source_title" | html_escape)"
+source_filter_e="$(printf "%s" "$source_filter" | html_escape)"
+
+printf "Content-Type: text/html; charset=utf-8\r\n\r\n"
+cat <<EOF
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="120">
+<title>SiteWatch</title>
+<style>
+:root{--bg:#f5f7fa;--panel:#fff;--panel2:#f8fafc;--text:#17202c;--muted:#647184;--line:#dce3eb;--blue:#1f6feb;--red:#c0323a;--amber:#9a6500;--green:#137333;--gray:#5c6573}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(180deg,#eaf0f6 0,#f7f9fb 230px,#f7f9fb 100%);color:var(--text);font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1240px;margin:0 auto;padding:22px}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+.brand{display:flex;align-items:center;gap:12px}.mark{width:42px;height:42px;border-radius:8px;background:#17202c;color:white;display:grid;place-items:center;font-weight:800;box-shadow:0 10px 24px rgba(23,32,44,.16)}
+h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-top:4px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.button{border:1px solid var(--line);background:var(--panel);border-radius:7px;color:var(--text);display:inline-flex;align-items:center;min-height:36px;padding:8px 11px;text-decoration:none;font-weight:650;box-shadow:0 1px 1px rgba(15,23,42,.04)}
+.button.primary{background:var(--blue);border-color:var(--blue);color:white}.button.warn{background:#fff7df;border-color:#f0d27a;color:#6f4a00}.button:hover{border-color:#b7c2d1}
+.toolbar{display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:14px}.tool{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:0 12px 30px rgba(20,35,55,.06)}
+.tool form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tool input,.tool select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
+.capture{color:var(--muted);font-size:13px;margin-top:8px}.summary{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:10px;margin-bottom:14px}
+.stat{background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:8px;padding:13px 14px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.stat .v{display:block;font-size:25px;line-height:1.2;font-weight:800;margin-top:4px}.stat.wide .v{font-size:16px;margin-top:7px}
+.health{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:16px}.pill-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.pill-card b{font-size:18px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
+.sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
+table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
+.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}
+.domain{font-weight:750}.source,.metric{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.muted{color:var(--muted)}.empty{padding:28px;text-align:center;color:var(--muted)}
+@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.toolbar{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.health{grid-template-columns:repeat(2,minmax(0,1fr))}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+@media(max-width:560px){.summary,.health{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
+</style>
+</head>
+<body>
+<main>
+<section class="top">
+<div class="brand"><div class="mark">SW</div><div><h1>SiteWatch</h1><div class="subtitle">Мониторинг блокировок по устройствам без постоянного DNS-логирования</div></div></div>
+<div class="actions">
+<a class="button warn" href="?action=capture&duration=45$source_q">Снять DNS 45 сек</a>
+<a class="button primary" href="?action=scan$source_q">Сканировать: $source_title_e</a>
+<a class="button" href="?action=export">Скачать список</a>
+</div>
+</section>
+
+<section class="toolbar">
+<div class="tool">
+<form method="get" action="/cgi-bin/sitewatch">
+<input type="hidden" name="action" value="scan">
+<label>Источник</label>
+<input name="source" value="$source_filter_e" placeholder="192.168.50.105">
+<button class="button primary" type="submit">Сканировать устройство</button>
+<a class="button" href="/cgi-bin/sitewatch">Сбросить фильтр</a>
+</form>
+<div class="capture">$capture_text</div>
+</div>
+<div class="tool">
+<form method="get" action="/cgi-bin/sitewatch">
+<input type="hidden" name="action" value="capture">
+<select name="duration"><option value="30">30 сек</option><option value="45" selected>45 сек</option><option value="90">90 сек</option><option value="180">180 сек</option></select>
+<button class="button warn" type="submit">Окно наблюдения</button>
+</form>
+</div>
+</section>
+
+<section class="summary">
+<div class="stat wide"><div class="k">Фильтр / последний скан</div><span class="v">$source_title_e · $last_scan</span></div>
+<div class="stat"><div class="k">DNS-запросов</div><span class="v">$total_seen</span></div>
+<div class="stat"><div class="k">Проверено</div><span class="v">$total_results</span></div>
+<div class="stat"><div class="k">VPN-список</div><span class="v">$total_proxy</span></div>
+<div class="stat"><div class="k">Ожидает</div><span class="v">$unchecked_count</span></div>
+</section>
+
+<section class="health">
+<div class="pill-card"><span><span class="dot blocked"></span>Заблокированы</span><b>$blocked_count</b></div>
+<div class="pill-card"><span><span class="dot slow"></span>Замедлены</span><b>$slow_count</b></div>
+<div class="pill-card"><span><span class="dot ok"></span>Норма</span><b>$ok_count</b></div>
+<div class="pill-card"><span><span class="dot proxy_failed"></span>Proxy fail</span><b>$failed_count</b></div>
+<div class="pill-card"><span><span class="dot unchecked"></span>Ожидают</span><b>$unchecked_count</b></div>
+</section>
+
+<nav class="sources">
+<a class="chip" href="/cgi-bin/sitewatch">Все устройства</a>
+EOF
+
+awk -F '\t' '{
+	count[$1] += $5;
+}
+END {
+	for (source in count) print source, count[source];
+}' "$SITEWATCH_SEEN" 2>/dev/null | sort | head -n 24 | while read -r src cnt; do
+	[ -n "$src" ] || continue
+	src_e="$(printf "%s" "$src" | html_escape)"
+	active=""
+	[ "$src" = "$source_filter" ] && active=" active"
+	printf '<a class="chip%s" href="?source=%s">%s <small>%s</small></a>\n' "$active" "$src_e" "$src_e" "$cnt"
+done
+
+cat <<EOF
+</nav>
+
+<section class="panel">
+<div class="panel-head"><div class="panel-title">Домены: $source_title_e</div><div class="hint">Страница обновляется раз в 2 минуты</div></div>
+<table>
+<thead><tr><th>Статус</th><th>Домен</th><th>Источник</th><th>Запросов</th><th>Напрямую</th><th>Через v2rayA</th><th>Скан</th></tr></thead>
+<tbody>
+EOF
+
+rows="$(
+awk -F '\t' -v source_filter="$source_filter" '
+	BEGIN { OFS = "\t"; }
+	FNR == NR {
+		if (source_filter == "" || $1 == source_filter) {
+			source[$2] = $1;
+			queries[$2] += $5;
+		}
+		next;
+	}
+	{
+		domain = $1;
+		if (source_filter == "" || $2 == source_filter) {
+			print $4, domain, $2, $3, $5 " / " $6 "s", $7 " / " $8 "s", $9;
+			done[domain] = 1;
+		}
+	}
+	END {
+		for (domain in queries) {
+			if (!(domain in done)) print "unchecked", domain, source[domain], queries[domain], "-", "-", "";
+		}
+	}
+' "$SITEWATCH_SEEN" "$SITEWATCH_RESULTS" 2>/dev/null | sort -t "	" -k1,1 -k4,4nr | head -n 250
+)"
+
+if [ -z "$rows" ]; then
+	printf '<tr><td class="empty" colspan="7">Нет данных для выбранного источника. Запусти окно наблюдения и открой нужный сайт с устройства.</td></tr>\n'
+else
+	printf "%s\n" "$rows" | while IFS="$(printf '\t')" read -r status domain source count direct proxy scanned; do
+		[ -n "$domain" ] || continue
+		status_class="$(printf "%s" "$status" | html_escape)"
+		status_text="$(status_label "$status" | html_escape)"
+		domain_e="$(printf "%s" "$domain" | html_escape)"
+		source_e="$(printf "%s" "$source" | html_escape)"
+		direct_e="$(printf "%s" "$direct" | html_escape)"
+		proxy_e="$(printf "%s" "$proxy" | html_escape)"
+		if [ -n "$scanned" ] && [ "$scanned" != "-" ]; then
+			scanned="$(date -d "@$scanned" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$scanned")"
+		else
+			scanned="-"
+		fi
+		printf '<tr><td><span class="status %s">%s</span></td><td class="domain">%s</td><td class="source">%s</td><td>%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="muted">%s</td></tr>\n' \
+			"$status_class" "$status_text" "$domain_e" "$source_e" "$count" "$direct_e" "$proxy_e" "$scanned"
+	done
+fi
+
+cat <<'EOF'
+</tbody></table>
+</section>
+</main>
+</body>
+</html>
+EOF

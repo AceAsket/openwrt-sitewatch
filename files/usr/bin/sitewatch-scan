@@ -1,0 +1,134 @@
+#!/bin/ash
+set -eu
+
+CONF="/etc/sitewatch/sitewatch.conf"
+[ -f "$CONF" ] && . "$CONF"
+
+: "${SITEWATCH_QUEUE:=/etc/sitewatch/queue.tsv}"
+: "${SITEWATCH_RESULTS:=/etc/sitewatch/results.tsv}"
+: "${SITEWATCH_PROXY_OUT:=/etc/sitewatch/proxy-domains.txt}"
+: "${SITEWATCH_LOCK:=/tmp/sitewatch-scan.lock}"
+: "${SITEWATCH_PROXY:=socks5h://127.0.0.1:20170}"
+: "${SITEWATCH_BATCH:=12}"
+: "${SITEWATCH_TIMEOUT:=7}"
+: "${SITEWATCH_MIN_RESCAN:=86400}"
+: "${SITEWATCH_SLOW_SECONDS:=5}"
+: "${SITEWATCH_SLOW_RATIO:=3}"
+: "${SITEWATCH_SOURCE_FILTER:=}"
+: "${SITEWATCH_FORCE_RESCAN:=0}"
+
+mkdir -p "$(dirname "$SITEWATCH_RESULTS")"
+touch "$SITEWATCH_QUEUE" "$SITEWATCH_RESULTS" "$SITEWATCH_PROXY_OUT"
+
+if ! mkdir "$SITEWATCH_LOCK" 2>/dev/null; then
+	echo "sitewatch scan already running"
+	exit 0
+fi
+trap 'rmdir "$SITEWATCH_LOCK" 2>/dev/null || true; rm -f /tmp/sitewatch-*.$$' EXIT
+
+now="$(date +%s)"
+todo="/tmp/sitewatch-todo.$$"
+last="/tmp/sitewatch-last.$$"
+
+printf "__dummy__\t0\n" > "$last"
+awk 'BEGIN { FS = "\t"; OFS = "\t"; } $1 != "" { print $1, $9; }' "$SITEWATCH_RESULTS" >> "$last"
+
+awk -v now="$now" -v min_rescan="$SITEWATCH_MIN_RESCAN" -v source_filter="$SITEWATCH_SOURCE_FILTER" -v force_rescan="$SITEWATCH_FORCE_RESCAN" '
+	BEGIN { FS = "\t"; OFS = "\t"; }
+	FNR == NR {
+		last_scan[$1] = $2;
+		next;
+	}
+	{
+		source = $1;
+		domain = $2;
+		request_count = $5;
+		if (domain == "") next;
+		if (source_filter != "" && source != source_filter) next;
+		if (!(domain in seen_domain) || request_count > seen_count[domain]) {
+			seen_domain[domain] = source;
+			seen_count[domain] = request_count;
+		}
+	}
+	END {
+		for (domain in seen_domain) {
+			if (force_rescan == "1" || !(domain in last_scan) || (now - last_scan[domain]) >= min_rescan) {
+				print seen_domain[domain], domain, seen_count[domain];
+			}
+		}
+	}
+' "$last" "$SITEWATCH_QUEUE" | sort -t "	" -k3,3nr | head -n "$SITEWATCH_BATCH" > "$todo"
+
+measure() {
+	url="$1"
+	proxy="$2"
+	if [ -n "$proxy" ]; then
+		out="$(curl -L -o /dev/null -sS \
+			--proxy "$proxy" \
+			--connect-timeout "$SITEWATCH_TIMEOUT" \
+			--max-time "$SITEWATCH_TIMEOUT" \
+			-w "%{http_code}\t%{time_total}" \
+			"$url" 2>/dev/null)" || {
+				printf "000\t%s" "$SITEWATCH_TIMEOUT"
+				return
+			}
+	else
+		out="$(curl -L -o /dev/null -sS \
+			--connect-timeout "$SITEWATCH_TIMEOUT" \
+			--max-time "$SITEWATCH_TIMEOUT" \
+			-w "%{http_code}\t%{time_total}" \
+			"$url" 2>/dev/null)" || {
+				printf "000\t%s" "$SITEWATCH_TIMEOUT"
+				return
+			}
+	fi
+	printf "%s" "$out"
+}
+
+classify() {
+	direct_code="$1"
+	direct_time="$2"
+	proxy_code="$3"
+	proxy_time="$4"
+
+	awk -v dc="$direct_code" -v dt="$direct_time" -v pc="$proxy_code" -v pt="$proxy_time" \
+		-v slow_s="$SITEWATCH_SLOW_SECONDS" -v ratio="$SITEWATCH_SLOW_RATIO" '
+		BEGIN {
+			if (pc == "000") {
+				print "proxy_failed";
+			} else if (dc == "000" && pc != "000") {
+				print "blocked";
+			} else if (dc != "000" && pc != "000" && dt >= slow_s && dt >= (pt * ratio)) {
+				print "slow";
+			} else {
+				print "ok";
+			}
+		}
+	'
+}
+
+new="/tmp/sitewatch-results.$$"
+cp "$SITEWATCH_RESULTS" "$new"
+
+while IFS="$(printf '\t')" read -r source domain count; do
+	[ -n "${domain:-}" ] || continue
+	url="https://$domain/"
+	direct="$(measure "$url" "")"
+	proxy="$(measure "$url" "$SITEWATCH_PROXY")"
+	direct_code="$(printf "%s" "$direct" | awk -F '\t' '{print $1}')"
+	direct_time="$(printf "%s" "$direct" | awk -F '\t' '{print $2}')"
+	proxy_code="$(printf "%s" "$proxy" | awk -F '\t' '{print $1}')"
+	proxy_time="$(printf "%s" "$proxy" | awk -F '\t' '{print $2}')"
+	status="$(classify "$direct_code" "$direct_time" "$proxy_code" "$proxy_time")"
+
+	awk -v d="$domain" 'BEGIN{FS=OFS="\t"} $1 != d {print}' "$new" > "$new.tmp"
+	mv "$new.tmp" "$new"
+	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+		"$domain" "$source" "$count" "$status" "$direct_code" "$direct_time" "$proxy_code" "$proxy_time" "$now" >> "$new"
+
+	if [ "$status" = "blocked" ] || [ "$status" = "slow" ]; then
+		grep -qx "domain:$domain" "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo "domain:$domain" >> "$SITEWATCH_PROXY_OUT"
+	fi
+done < "$todo"
+
+sort -t "	" -k4,4 -k1,1 "$new" > "$SITEWATCH_RESULTS"
