@@ -285,7 +285,11 @@ case "$action" in
 		printf "Content-Type: text/plain; charset=utf-8\r\n\r\n"
 		printf "capture=%s\n" "$(cat "$SITEWATCH_CAPTURE_STATUS" 2>/dev/null || true)"
 		printf "scan=%s\n" "$(cat "$SITEWATCH_SCAN_STATUS" 2>/dev/null || true)"
-		printf "dns_logging=%s\n" "$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
+		if command -v uci >/dev/null 2>&1; then
+			printf "dns_logging=%s\n" "$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
+		else
+			printf "dns_logging=0\n"
+		fi
 		printf "seen=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $1 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_SEEN" 2>/dev/null)"
 		printf "results=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $2 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
 		printf "pending=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'FNR == NR { if (source_filter == "" || $2 == source_filter) result[$1] = 1; next } (source_filter == "" || $1 == source_filter) && !result[$2] && !seen[$2]++ { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" "$SITEWATCH_SEEN" 2>/dev/null)"
@@ -407,7 +411,11 @@ failed_count="$(awk -F '\t' -v source_filter="$source_filter" '$4 == "proxy_fail
 unchecked_count="$(awk -F '\t' -v source_filter="$source_filter" 'FNR == NR { if (source_filter == "" || $2 == source_filter) result[$1] = 1; next } (source_filter == "" || $1 == source_filter) && !result[$2] && !seen[$2]++ { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" "$SITEWATCH_SEEN" 2>/dev/null)"
 last_scan="$(awk -F '\t' -v source_filter="$source_filter" 'BEGIN{m=0} (source_filter == "" || $2 == source_filter) && $9>m{m=$9} END{print m}' "$SITEWATCH_RESULTS" 2>/dev/null)"
 [ -n "$last_scan" ] && [ "$last_scan" != "0" ] && last_scan="$(date -d "@$last_scan" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last_scan")" || last_scan="нет данных"
-dns_logging="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
+if command -v uci >/dev/null 2>&1; then
+	dns_logging="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
+else
+	dns_logging="0"
+fi
 capture_status="$(cat "$SITEWATCH_CAPTURE_STATUS" 2>/dev/null || true)"
 capture_text="DNS-логирование выключено"
 [ "$dns_logging" = "1" ] && capture_text="DNS-логирование включено"

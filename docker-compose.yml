@@ -1,0 +1,22 @@
+services:
+  sitewatch:
+    build: .
+    image: openwrt-sitewatch:local
+    container_name: sitewatch
+    ports:
+      - "8095:8095"
+    volumes:
+      - sitewatch-data:/data
+      - ./logs:/logs:ro
+    environment:
+      SITEWATCH_PROXY: "http://host.docker.internal:20171"
+      SITEWATCH_PIHOLE_API_ENABLED: "0"
+      SITEWATCH_PIHOLE_URL: ""
+      SITEWATCH_PIHOLE_PASSWORD: ""
+      SITEWATCH_PIHOLE_LOOKBACK: "600"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  sitewatch-data:

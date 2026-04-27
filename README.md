@@ -77,6 +77,33 @@ dist/SHA256SUMS
 
 Установщик сам выберет подходящий `dist/sitewatch-linux-*` по `uname -m` и `/etc/openwrt_release` и положит его в `/usr/bin/sitewatch`. Если автоопределение не подошло, скопируй нужный бинарник вручную как `/usr/bin/sitewatch`.
 
+## Docker / отдельный сервис
+
+SiteWatch можно запустить отдельно от роутера в контейнере. В этом режиме приложение не включает `dnsmasq` на OpenWrt само: оно читает примонтированные DNS-логи из `/logs`, опционально забирает запросы через Pi-hole API и выполняет HTTP/proxy-проверки из контейнера.
+
+Быстрый запуск:
+
+```sh
+docker compose up -d --build
+```
+
+Открыть:
+
+```text
+http://localhost:8095/
+```
+
+Данные и настройки живут в volume `sitewatch-data`, а локальные логи можно положить или примонтировать в `./logs`. Основные переменные в `docker-compose.yml`:
+
+```yaml
+SITEWATCH_PROXY: "http://host.docker.internal:20171"
+SITEWATCH_PIHOLE_API_ENABLED: "1"
+SITEWATCH_PIHOLE_URL: "http://192.168.50.50:8155"
+SITEWATCH_PIHOLE_PASSWORD: "<password>"
+```
+
+Если v2rayA работает на роутере, укажи роутер вместо `host.docker.internal`, например `http://192.168.50.1:20171`. Если контейнер нужен только для ручной проверки и Pi-hole API, DNS-логи можно не монтировать.
+
 ## Установка
 
 Скопировать папку `openwrt-sitewatch` на роутер, например в `/root/openwrt-sitewatch`, и выполнить:

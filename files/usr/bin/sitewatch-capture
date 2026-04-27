@@ -30,16 +30,24 @@ if ! mkdir "$SITEWATCH_CAPTURE_LOCK" 2>/dev/null; then
 	exit 0
 fi
 
-prev="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo __absent__)"
+have_dnsmasq_control=0
+if command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/dnsmasq ]; then
+	have_dnsmasq_control=1
+	prev="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo __absent__)"
+else
+	prev="__absent__"
+fi
 
 restore_dns_logging() {
-	if [ "$prev" = "__absent__" ]; then
-		uci -q delete dhcp.@dnsmasq[0].logqueries || true
-	else
-		uci set dhcp.@dnsmasq[0].logqueries="$prev"
+	if [ "$have_dnsmasq_control" = "1" ]; then
+		if [ "$prev" = "__absent__" ]; then
+			uci -q delete dhcp.@dnsmasq[0].logqueries || true
+		else
+			uci set dhcp.@dnsmasq[0].logqueries="$prev"
+		fi
+		uci commit dhcp
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
 	fi
-	uci commit dhcp
-	/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
 	rmdir "$SITEWATCH_CAPTURE_LOCK" 2>/dev/null || true
 	rm -f "$SITEWATCH_CAPTURE_STOP"
 }
@@ -49,9 +57,11 @@ trap 'restore_dns_logging' EXIT INT TERM
 now="$(date +%s)"
 printf "running\t%s\t%s\t%s\n" "$now" "$duration" "$now" > "$SITEWATCH_CAPTURE_STATUS"
 
-uci set dhcp.@dnsmasq[0].logqueries="1"
-uci commit dhcp
-/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+if [ "$have_dnsmasq_control" = "1" ]; then
+	uci set dhcp.@dnsmasq[0].logqueries="1"
+	uci commit dhcp
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+fi
 
 elapsed=0
 while :; do
