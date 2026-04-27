@@ -183,7 +183,7 @@ pihole_state="disabled"
 pihole_count="0"
 pihole_checked=""
 [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && pihole_state="configured"
-if [ -n "$pihole_status_raw" ]; then
+if [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && [ -n "$pihole_status_raw" ]; then
 	pihole_state="$(printf "%s" "$pihole_status_raw" | awk -F '\t' '{print $1}')"
 	pihole_count="$(printf "%s" "$pihole_status_raw" | awk -F '\t' '{print $3}')"
 	pihole_checked="$(printf "%s" "$pihole_status_raw" | awk -F '\t' '{print $4}')"
