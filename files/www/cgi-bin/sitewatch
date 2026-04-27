@@ -191,6 +191,62 @@ dpi_note() {
 	esac
 }
 
+print_domain_rows() {
+	source_filter="$1"
+	rows="$(
+	awk -F '\t' -v source_filter="$source_filter" '
+		BEGIN { OFS = "\t"; }
+		FNR == NR {
+			if (source_filter == "" || $1 == source_filter) {
+				source[$2] = $1;
+				queries[$2] += $5;
+			}
+			next;
+		}
+		{
+			domain = $1;
+			if (source_filter == "" || $2 == source_filter) {
+				dpi = (NF >= 10 && $10 != "") ? $10 : "-";
+				direct = $5 " / " $6 " с";
+				proxy = $7 " / " $8 " с";
+				print $4, domain, $2, $3, direct, proxy, dpi, $9;
+				done[domain] = 1;
+			}
+		}
+		END {
+			for (domain in queries) {
+				if (!(domain in done)) print "unchecked", domain, source[domain], queries[domain], "-", "-", "-", "";
+			}
+		}
+	' "$SITEWATCH_SEEN" "$SITEWATCH_RESULTS" 2>/dev/null | sort -t "	" -k1,1 -k4,4nr | head -n 250
+	)"
+
+	if [ -z "$rows" ]; then
+		printf '<tr><td class="empty" colspan="8">Нет данных для выбранного источника. Запусти окно наблюдения и открой нужный сайт с устройства.</td></tr>\n'
+	else
+		printf "%s\n" "$rows" | while IFS="$(printf '\t')" read -r status domain source count direct proxy dpi scanned; do
+			[ -n "$domain" ] || continue
+			status_class="$(printf "%s" "$status" | html_escape)"
+			status_text="$(status_label "$status" | html_escape)"
+			domain_e="$(printf "%s" "$domain" | html_escape)"
+			source_e="$(printf "%s" "$source" | html_escape)"
+			direct_e="$(printf "%s" "$direct" | html_escape)"
+			proxy_e="$(printf "%s" "$proxy" | html_escape)"
+			dpi_e="$(printf "%s" "${dpi:--}" | html_escape)"
+			dpi_note_e="$(dpi_note "${dpi:--}" | html_escape)"
+			dpi_class=""
+			case "$dpi" in ""|-|ok) ;; *) dpi_class=" detected" ;; esac
+			if [ -n "$scanned" ] && [ "$scanned" != "-" ]; then
+				scanned="$(date -d "@$scanned" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$scanned")"
+			else
+				scanned="-"
+			fi
+			scanned_e="$(printf "%s" "$scanned" | html_escape)"
+			printf '<tr><td><span class="status %s">%s</span></td><td class="domain">%s</td><td class="source">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="metric">%s</td><td><span class="dpi-tag%s" title="%s">%s</span></td><td class="muted">%s</td></tr>\n' "$status_class" "$status_text" "$domain_e" "$source_e" "$count" "$direct_e" "$proxy_e" "$dpi_class" "$dpi_note_e" "$dpi_e" "$scanned_e"
+		done
+	fi
+}
+
 action="$(param action)"
 source_filter="$(safe_token "$(param source)")"
 duration="$(safe_token "$(param duration)")"
@@ -234,6 +290,11 @@ case "$action" in
 		printf "results=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $2 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
 		printf "pending=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'FNR == NR { if (source_filter == "" || $2 == source_filter) result[$1] = 1; next } (source_filter == "" || $1 == source_filter) && !result[$2] && !seen[$2]++ { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" "$SITEWATCH_SEEN" 2>/dev/null)"
 		printf "proxy=%s\n" "$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
+		exit 0
+		;;
+	rows)
+		printf "Content-Type: text/html; charset=utf-8\r\n\r\n"
+		print_domain_rows "$source_filter"
 		exit 0
 		;;
 	scan)
@@ -741,6 +802,7 @@ cat <<EOF
 <tbody>
 EOF
 
+if false; then
 rows="$(
 awk -F '\t' -v source_filter="$source_filter" '
 	BEGIN { OFS = "\t"; }
@@ -793,6 +855,8 @@ else
 			"$status_class" "$status_text" "$domain_e" "$source_e" "$count" "$direct_e" "$proxy_e" "$dpi_class" "$dpi_note_e" "$dpi_e" "$scanned"
 	done
 fi
+fi
+print_domain_rows "$source_filter"
 
 cat <<'EOF'
 </tbody></table>
@@ -851,6 +915,7 @@ cat <<'EOF'
   window.sitewatchPending = '$unchecked_count';
   var reloadedAfterDone = false;
   var autoScanPending = false;
+  var lastRowsSignature = '';
   var modeLabels = {
     running: 'идет',
     done: 'завершено',
@@ -961,6 +1026,11 @@ cat <<'EOF'
         if (data.results && results) results.textContent = data.results;
         if (data.proxy && proxyTotal) proxyTotal.textContent = data.proxy;
         if (data.pending != null) window.sitewatchPending = data.pending;
+        var rowsSignature = [data.capture || '', data.scan || '', data.seen || '', data.results || '', data.pending || ''].join('|');
+        if (rowsSignature !== lastRowsSignature && window.sitewatchRefreshRows) {
+          lastRowsSignature = rowsSignature;
+          window.sitewatchRefreshRows();
+        }
         var pending = Math.max(0, asNumber(data.pending || window.sitewatchPending || '0'));
         if (data.scan && data.scan.indexOf('done\t') === 0 && pending > 0 && !autoScanPending) {
           autoScanPending = true;
@@ -985,6 +1055,8 @@ cat <<'EOF'
   var tbody = table.tBodies[0];
   var activeIndex = -1;
   var activeDir = 1;
+  var refreshInFlight = false;
+  var source = '$source_filter_e';
   function value(row, index, type){
     var raw = (row.cells[index] ? row.cells[index].textContent : '').trim();
     if (type === 'number') {
@@ -993,27 +1065,47 @@ cat <<'EOF'
     }
     return raw.toLowerCase();
   }
+  function applySort(){
+    if (activeIndex < 0) return;
+    var th = table.querySelectorAll('th.sortable')[activeIndex];
+    if (!th) return;
+    var type = th.getAttribute('data-type') || 'text';
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr')).filter(function(row){
+      return !row.querySelector('.empty');
+    });
+    rows.sort(function(a, b){
+      var av = value(a, activeIndex, type);
+      var bv = value(b, activeIndex, type);
+      if (av < bv) return -1 * activeDir;
+      if (av > bv) return 1 * activeDir;
+      return 0;
+    });
+    rows.forEach(function(row){ tbody.appendChild(row); });
+    table.querySelectorAll('.sort-indicator').forEach(function(node){ node.textContent = ''; });
+    var indicator = th.querySelector('.sort-indicator');
+    if (indicator) indicator.textContent = activeDir > 0 ? '↑' : '↓';
+  }
   table.querySelectorAll('th.sortable').forEach(function(th, index){
     th.addEventListener('click', function(){
-      var type = th.getAttribute('data-type') || 'text';
       activeDir = activeIndex === index ? -activeDir : 1;
       activeIndex = index;
-      var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr')).filter(function(row){
-        return !row.querySelector('.empty');
-      });
-      rows.sort(function(a, b){
-        var av = value(a, index, type);
-        var bv = value(b, index, type);
-        if (av < bv) return -1 * activeDir;
-        if (av > bv) return 1 * activeDir;
-        return 0;
-      });
-      rows.forEach(function(row){ tbody.appendChild(row); });
-      table.querySelectorAll('.sort-indicator').forEach(function(node){ node.textContent = ''; });
-      var indicator = th.querySelector('.sort-indicator');
-      if (indicator) indicator.textContent = activeDir > 0 ? '↑' : '↓';
+      applySort();
     });
   });
+  window.sitewatchRefreshRows = function(){
+    if (refreshInFlight || !window.fetch) return;
+    refreshInFlight = true;
+    fetch((window.location.pathname || '/') + '?action=rows' + (source ? '&source=' + encodeURIComponent(source) : ''), {cache:'no-store'})
+      .then(function(resp){ return resp.text(); })
+      .then(function(html){
+        if (html && html.indexOf('<tr') !== -1) {
+          tbody.innerHTML = html;
+          applySort();
+        }
+      })
+      .catch(function(){})
+      .finally(function(){ refreshInFlight = false; });
+  };
 })();
 </script>
 <script>
@@ -1118,6 +1210,7 @@ cat <<'EOF'
             .then(function(text){
               var status = parseTSV(text.replace(/=/g, '\t'));
               if (status.proxy) proxyTotal.textContent = status.proxy;
+              if (window.sitewatchRefreshRows) window.sitewatchRefreshRows();
             }).catch(function(){});
         }
       })
