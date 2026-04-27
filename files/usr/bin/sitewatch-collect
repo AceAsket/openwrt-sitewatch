@@ -19,7 +19,7 @@ mkdir -p "$(dirname "$SITEWATCH_QUEUE")"
 touch "$SITEWATCH_QUEUE" "$SITEWATCH_SEEN"
 
 tmp="/tmp/sitewatch-collect.$$"
-trap 'rm -f "$tmp" "$tmp.new"' EXIT
+trap 'rm -f "$tmp" "$tmp.new" /tmp/sitewatch-pihole-parsed.$$' EXIT
 : > "$tmp"
 
 for log in $SITEWATCH_LOG_FILES; do
@@ -55,41 +55,48 @@ if [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && [ -n "$SITEWATCH_PIHOLE_URL" ] &
 	cookie="/tmp/sitewatch-pihole-cookie.$$"
 	auth="/tmp/sitewatch-pihole-auth.$$"
 	queries="/tmp/sitewatch-pihole-queries.$$"
+	parsed="/tmp/sitewatch-pihole-parsed.$$"
 	from_ts="$(($(date +%s) - SITEWATCH_PIHOLE_LOOKBACK))"
 	url="${SITEWATCH_PIHOLE_URL%/}"
-	trap 'rm -f "$tmp" "$tmp.new" "$cookie" "$auth" "$queries"' EXIT
+	trap 'rm -f "$tmp" "$tmp.new" "$cookie" "$auth" "$queries" "$parsed"' EXIT
+	password_json="$(printf "%s" "$SITEWATCH_PIHOLE_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 
 	curl -sS -m 8 -c "$cookie" \
 		-H "Content-Type: application/json" \
-		-d "{\"password\":\"$SITEWATCH_PIHOLE_PASSWORD\"}" \
+		-d "{\"password\":\"$password_json\"}" \
 		"$url/api/auth" > "$auth" 2>/dev/null || true
 
-	csrf="$(sed -n 's/.*"csrf":"\([^"]*\)".*/\1/p' "$auth" | head -n 1)"
-	if grep -q '"valid":true' "$auth"; then
+	csrf="$(jsonfilter -q -i "$auth" -e '@.session.csrf' 2>/dev/null || sed -n 's/.*"csrf"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$auth" | head -n 1)"
+	if grep -Eq '"valid"[[:space:]]*:[[:space:]]*true' "$auth"; then
 		curl -sS -m 15 -b "$cookie" \
 			-H "X-CSRF-TOKEN: $csrf" \
 			"$url/api/queries?disk=true&from=$from_ts" > "$queries" 2>/dev/null || true
 
-		query_count="$(grep -o '"domain":' "$queries" 2>/dev/null | wc -l)"
-		printf "ok\t%s\t%s\t%s\n" "$url" "$query_count" "$(date +%s)" > "$SITEWATCH_PIHOLE_STATUS"
-		sed 's/},{"id":/\n{"id":/g' "$queries" | awk '
-			function field(line, key, out, re) {
-				re = "\"" key "\":\"[^\"]*\"";
-				if (match(line, re)) {
-					out = substr(line, RSTART + length(key) + 4, RLENGTH - length(key) - 5);
-					return out;
-				}
-				return "";
+		sed 's/}[[:space:]]*,[[:space:]]*{"id":/}\n{"id":/g' "$queries" | awk '
+			function string_field(line, key, tmp) {
+				tmp = line;
+				if (tmp !~ "\"" key "\"[[:space:]]*:[[:space:]]*\"") return "";
+				sub("^.*\"" key "\"[[:space:]]*:[[:space:]]*\"", "", tmp);
+				sub("\".*$", "", tmp);
+				return tmp;
 			}
 			/"domain":/ && /"client":/ {
-				domain = field($0, "domain");
+				domain = string_field($0, "domain");
 				client = $0;
-				sub(/^.*"client":\{/, "", client);
-				sub(/\}.*$/, "", client);
-				source = field(client, "ip");
+				source = "";
+				if (client ~ /"client"[[:space:]]*:[[:space:]]*\{/) {
+					sub(/^.*"client"[[:space:]]*:[[:space:]]*\{/, "", client);
+					sub(/\}.*$/, "", client);
+					source = string_field(client, "ip");
+				} else {
+					source = string_field($0, "client");
+				}
 				if (domain != "" && source != "" && source !~ /^127\./ && source != "::1") print source "\t" domain;
 			}
-		' >> "$tmp"
+		' > "$parsed"
+		cat "$parsed" >> "$tmp"
+		query_count="$(wc -l < "$parsed" 2>/dev/null || echo 0)"
+		printf "ok\t%s\t%s\t%s\n" "$url" "$query_count" "$(date +%s)" > "$SITEWATCH_PIHOLE_STATUS"
 	else
 		printf "auth_failed\t%s\t0\t%s\n" "$url" "$(date +%s)" > "$SITEWATCH_PIHOLE_STATUS"
 	fi

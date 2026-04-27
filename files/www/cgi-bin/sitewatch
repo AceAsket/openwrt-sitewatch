@@ -123,6 +123,7 @@ case "$action" in
 		printf "dns_logging=%s\n" "$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
 		printf "seen=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $1 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_SEEN" 2>/dev/null)"
 		printf "results=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $2 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
+		printf "proxy=%s\n" "$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
 		exit 0
 		;;
 	scan)
@@ -140,6 +141,19 @@ case "$action" in
 				manual_result="$("$SITEWATCH_CHECK_URL_BIN" "$manual_url" 2>/dev/null || true)"
 			fi
 		fi
+		;;
+	manual_check_api)
+		printf "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+		if [ -n "$manual_url" ]; then
+			if [ "$manual_add" = "1" ]; then
+				"$SITEWATCH_CHECK_URL_BIN" --add "$manual_url" 2>/dev/null || true
+			else
+				"$SITEWATCH_CHECK_URL_BIN" "$manual_url" 2>/dev/null || true
+			fi
+		else
+			printf "status\terror\nerror\tempty_url\n"
+		fi
+		exit 0
 		;;
 	export)
 		printf "Content-Type: text/plain; charset=utf-8\r\n"
@@ -299,7 +313,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
 .export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.export-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.45)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
-.manual-panel form{display:grid;grid-template-columns:minmax(220px,1fr) auto auto;gap:8px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:9px;background:rgba(255,255,255,.45)}.manual-metric span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}
+.manual-panel form{display:grid;grid-template-columns:minmax(220px,1fr) auto auto;gap:8px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-result:empty{display:none}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:9px;background:rgba(255,255,255,.45)}.manual-metric span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}.manual-loading{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.manual-panel.loading .manual-loading{display:flex}.spinner{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 .status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}
@@ -378,7 +392,7 @@ button.button{font:inherit;cursor:pointer}
 <div class="stat wide"><div class="k">Фильтр / последний скан</div><span class="v" id="summaryScope">$source_title_e · $last_scan</span></div>
 <div class="stat"><div class="k">DNS-запросов</div><span class="v" id="summarySeen">$total_seen</span></div>
 <div class="stat"><div class="k">Проверено</div><span class="v" id="summaryResults">$total_results</span></div>
-<div class="stat"><div class="k">VPN-список</div><span class="v">$total_proxy</span></div>
+<div class="stat"><div class="k">VPN-список</div><span class="v" id="summaryProxy">$total_proxy</span></div>
 <div class="stat"><div class="k">Ожидает</div><span class="v">$unchecked_count</span></div>
 </section>
 
@@ -392,28 +406,29 @@ button.button{font:inherit;cursor:pointer}
 
 <section class="manual-panel">
 <div class="tool-title">Ручная проверка URL</div>
-<form method="get" action="/cgi-bin/sitewatch">
+<form method="get" action="/cgi-bin/sitewatch" id="manualCheckForm">
 <input type="hidden" name="action" value="manual_check">
 <input type="text" name="url" value="$manual_url_e" placeholder="https://youmagine.com/">
 <label class="checkline"><input type="checkbox" name="add" value="1"> добавить в VPN-список при блокировке</label>
 <button class="button primary" type="submit">Проверить URL</button>
 </form>
+<div class="manual-loading"><span class="spinner"></span><span>Проверяем напрямую и через v2rayA</span></div>
+<div class="manual-result" id="manualResult">
 EOF
 
 if [ -n "$manual_result" ]; then
 cat <<EOF
-<div class="manual-result">
 <div class="manual-metric"><span>Статус</span><b><span class="status $manual_status_e">$manual_status_text_e</span></b></div>
 <div class="manual-metric"><span>Домен</span><b>$manual_domain_e</b></div>
 <div class="manual-metric"><span>Напрямую</span><b>$manual_direct_code_e / ${manual_direct_time_e}s</b></div>
 <div class="manual-metric"><span>Через v2rayA</span><b>$manual_proxy_code_e / ${manual_proxy_time_e}s</b></div>
 <div class="manual-metric"><span>URL</span><b>$manual_checked_url_e</b></div>
 <div class="manual-metric"><span>VPN-список</span><b>$manual_added_e</b></div>
-</div>
 EOF
 fi
 
 cat <<EOF
+</div>
 </section>
 
 <section class="source-panel">
@@ -546,6 +561,7 @@ cat <<'EOF'
   var title = document.getElementById('captureTitle');
   var seen = document.getElementById('summarySeen');
   var results = document.getElementById('summaryResults');
+  var proxyTotal = document.getElementById('summaryProxy');
   var source = '$source_filter_e';
   var reloadedAfterDone = false;
   function parseStatus(text){
@@ -604,10 +620,99 @@ cat <<'EOF'
         if (data.capture) setCapture(data.capture);
         if (data.seen && seen) seen.textContent = data.seen;
         if (data.results && results) results.textContent = data.results;
+        if (data.proxy && proxyTotal) proxyTotal.textContent = data.proxy;
         render();
       }).catch(function(){});
     }, 6000);
   }
+})();
+</script>
+<script>
+(function(){
+  var form = document.getElementById('manualCheckForm');
+  var panel = form ? form.closest('.manual-panel') : null;
+  var result = document.getElementById('manualResult');
+  var proxyTotal = document.getElementById('summaryProxy');
+  if (!form || !panel || !result || !window.fetch) return;
+
+  var labels = {
+    blocked: 'заблокирован',
+    slow: 'замедлен',
+    ok: 'норма',
+    proxy_failed: 'proxy fail',
+    error: 'ошибка'
+  };
+
+  function parseTSV(text){
+    var out = {};
+    text.trim().split('\n').forEach(function(line){
+      var idx = line.indexOf('\t');
+      if (idx > -1) out[line.slice(0, idx)] = line.slice(idx + 1);
+    });
+    return out;
+  }
+
+  function text(value){
+    return value == null || value === '' ? '-' : String(value);
+  }
+
+  function metric(title, body){
+    var box = document.createElement('div');
+    box.className = 'manual-metric';
+    var label = document.createElement('span');
+    label.textContent = title;
+    var value = document.createElement('b');
+    if (body instanceof Node) value.appendChild(body);
+    else value.textContent = text(body);
+    box.appendChild(label);
+    box.appendChild(value);
+    return box;
+  }
+
+  function render(data){
+    result.textContent = '';
+    var status = data.status || 'error';
+    var badge = document.createElement('span');
+    badge.className = 'status ' + status;
+    badge.textContent = labels[status] || status;
+    result.appendChild(metric('Статус', badge));
+    result.appendChild(metric('Домен', data.domain));
+    result.appendChild(metric('Напрямую', text(data.direct_code) + ' / ' + text(data.direct_time) + 's'));
+    result.appendChild(metric('Через v2rayA', text(data.proxy_code) + ' / ' + text(data.proxy_time) + 's'));
+    result.appendChild(metric('URL', data.url));
+    result.appendChild(metric('VPN-список', data.added || data.error || 'no'));
+  }
+
+  form.addEventListener('submit', function(event){
+    event.preventDefault();
+    var params = new URLSearchParams(new FormData(form));
+    params.set('action', 'manual_check_api');
+    panel.classList.add('loading');
+    result.textContent = '';
+    var button = form.querySelector('button[type="submit"]');
+    if (button) button.disabled = true;
+    fetch('/cgi-bin/sitewatch?' + params.toString(), {cache:'no-store'})
+      .then(function(resp){ return resp.text(); })
+      .then(function(body){
+        var data = parseTSV(body);
+        render(data);
+        if ((data.added === 'yes' || data.added === 'already') && proxyTotal) {
+          fetch('/cgi-bin/sitewatch?action=status', {cache:'no-store'})
+            .then(function(resp){ return resp.text(); })
+            .then(function(text){
+              var status = parseTSV(text.replace(/=/g, '\t'));
+              if (status.proxy) proxyTotal.textContent = status.proxy;
+            }).catch(function(){});
+        }
+      })
+      .catch(function(){
+        render({status:'error', error:'network'});
+      })
+      .finally(function(){
+        panel.classList.remove('loading');
+        if (button) button.disabled = false;
+      });
+  });
 })();
 </script>
 </body>
