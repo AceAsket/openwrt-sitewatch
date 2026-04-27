@@ -1,0 +1,5 @@
+*.sh text eol=lf
+files/usr/bin/* text eol=lf
+files/www/cgi-bin/* text eol=lf
+*.conf text eol=lf
+*.md text eol=lf
