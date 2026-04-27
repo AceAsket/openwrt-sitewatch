@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,8 @@ type config struct {
 	ForceRescan     bool
 	ExcludeDomains  []string
 	CheckBaseDomain bool
+	DNSServer       string
+	DoHURL          string
 }
 
 type measurement struct {
@@ -43,12 +46,40 @@ type measurement struct {
 }
 
 type checkResult struct {
-	Status     string
-	URL        string
-	Domain     string
-	Direct     measurement
-	Proxy      measurement
-	Added      string
+	Status string
+	URL    string
+	Domain string
+	Direct measurement
+	Proxy  measurement
+	Added  string
+	DPI    dpiProbe
+}
+
+type dnsProbe struct {
+	Status string
+	UDPIP  string
+	DoHIP  string
+	Detail string
+}
+
+type tlsProbe struct {
+	Status string
+	Time   float64
+	Detail string
+}
+
+type httpProbe struct {
+	Status string
+	Code   string
+	Time   float64
+	Detail string
+}
+
+type dpiProbe struct {
+	DNS   dnsProbe
+	TLS13 tlsProbe
+	TLS12 tlsProbe
+	HTTP  httpProbe
 }
 
 type seenEntry struct {
@@ -125,6 +156,8 @@ func loadConfig() config {
 		ForceRescan:     getStr(values, "SITEWATCH_FORCE_RESCAN", "0") == "1",
 		ExcludeDomains:  strings.Fields(getStr(values, "SITEWATCH_EXCLUDE_DOMAINS", "connectivitycheck.gstatic.com connectivitycheck.android.com")),
 		CheckBaseDomain: getStr(values, "SITEWATCH_CHECK_BASE_DOMAIN", "1") == "1",
+		DNSServer:       getStr(values, "SITEWATCH_DPI_DNS_SERVER", "1.1.1.1"),
+		DoHURL:          getStr(values, "SITEWATCH_DPI_DOH_URL", "https://cloudflare-dns.com/dns-query"),
 	}
 }
 
@@ -202,6 +235,20 @@ func cmdCheckURL(cfg config, args []string) error {
 	fmt.Printf("direct_time\t%.6f\n", result.Direct.Time)
 	fmt.Printf("proxy_code\t%s\n", result.Proxy.Code)
 	fmt.Printf("proxy_time\t%.6f\n", result.Proxy.Time)
+	fmt.Printf("dns_status\t%s\n", result.DPI.DNS.Status)
+	fmt.Printf("dns_udp_ip\t%s\n", result.DPI.DNS.UDPIP)
+	fmt.Printf("dns_doh_ip\t%s\n", result.DPI.DNS.DoHIP)
+	fmt.Printf("dns_detail\t%s\n", result.DPI.DNS.Detail)
+	fmt.Printf("tls13_status\t%s\n", result.DPI.TLS13.Status)
+	fmt.Printf("tls13_time\t%.6f\n", result.DPI.TLS13.Time)
+	fmt.Printf("tls13_detail\t%s\n", result.DPI.TLS13.Detail)
+	fmt.Printf("tls12_status\t%s\n", result.DPI.TLS12.Status)
+	fmt.Printf("tls12_time\t%.6f\n", result.DPI.TLS12.Time)
+	fmt.Printf("tls12_detail\t%s\n", result.DPI.TLS12.Detail)
+	fmt.Printf("http_status\t%s\n", result.DPI.HTTP.Status)
+	fmt.Printf("http_code\t%s\n", result.DPI.HTTP.Code)
+	fmt.Printf("http_time\t%.6f\n", result.DPI.HTTP.Time)
+	fmt.Printf("http_detail\t%s\n", result.DPI.HTTP.Detail)
 	fmt.Printf("added\t%s\n", result.Added)
 	return nil
 }
@@ -324,6 +371,7 @@ func checkURL(cfg config, input string, add bool) (checkResult, error) {
 
 	direct := measureURL(cfg, checkedURL, "")
 	proxy := measureURL(cfg, checkedURL, cfg.Proxy)
+	dpi := probeDPI(cfg, host)
 	status := classify(cfg, direct, proxy)
 	added := "no"
 	if add {
@@ -337,6 +385,7 @@ func checkURL(cfg config, input string, add bool) (checkResult, error) {
 		Direct: direct,
 		Proxy:  proxy,
 		Added:  added,
+		DPI:    dpi,
 	}, nil
 }
 
@@ -423,6 +472,316 @@ func measureURL(cfg config, target string, proxyRaw string) measurement {
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 512*1024))
 	return measurement{Code: fmt.Sprintf("%03d", resp.StatusCode), Time: elapsed}
+}
+
+func probeDPI(cfg config, domain string) dpiProbe {
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout*3)
+	defer cancel()
+
+	dns := probeDNS(ctx, cfg, domain)
+	probeIP := dns.DoHIP
+	if net.ParseIP(probeIP) == nil {
+		probeIP = dns.UDPIP
+	}
+	if net.ParseIP(probeIP) == nil {
+		return dpiProbe{
+			DNS:   dns,
+			TLS13: tlsProbe{Status: "skipped", Detail: "no_probe_ip"},
+			TLS12: tlsProbe{Status: "skipped", Detail: "no_probe_ip"},
+			HTTP:  httpProbe{Status: "skipped", Detail: "no_probe_ip"},
+		}
+	}
+
+	return dpiProbe{
+		DNS:   dns,
+		TLS13: probeTLS(ctx, cfg, domain, probeIP, tls.VersionTLS13),
+		TLS12: probeTLS(ctx, cfg, domain, probeIP, tls.VersionTLS12),
+		HTTP:  probeHTTP(ctx, cfg, domain, probeIP),
+	}
+}
+
+type dohResponse struct {
+	Answer []struct {
+		Type int    `json:"type"`
+		Data string `json:"data"`
+	} `json:"Answer"`
+}
+
+func probeDNS(ctx context.Context, cfg config, domain string) dnsProbe {
+	dohIPs, dohErr := resolveDoHAll(ctx, cfg, domain)
+	udpIPs, udpErr := resolveUDPAll(ctx, cfg, domain)
+	dohIP := strings.Join(dohIPs, ",")
+	udpIP := strings.Join(udpIPs, ",")
+
+	result := dnsProbe{
+		Status: "ok",
+		UDPIP:  valueOrError(udpIP, udpErr),
+		DoHIP:  valueOrError(dohIP, dohErr),
+	}
+
+	switch {
+	case dohErr != nil && udpErr != nil:
+		result.Status = "blocked"
+		result.Detail = "doh_and_udp_failed"
+	case dohErr != nil:
+		result.Status = "doh_failed"
+		result.Detail = cleanDetail(dohErr.Error())
+	case udpErr != nil:
+		result.Status = "intercepted"
+		result.Detail = cleanDetail(udpErr.Error())
+	case len(dohIPs) > 0 && len(udpIPs) > 0 && !anyIPOverlap(dohIPs, udpIPs):
+		result.Status = "spoofed"
+		result.Detail = "udp_doh_mismatch"
+	default:
+		result.Detail = "udp_matches_doh"
+	}
+
+	return result
+}
+
+func resolveDoH(ctx context.Context, cfg config, domain string) (string, error) {
+	ips, err := resolveDoHAll(ctx, cfg, domain)
+	if err != nil {
+		return "", err
+	}
+	return ips[0], nil
+}
+
+func resolveDoHAll(ctx context.Context, cfg config, domain string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+
+	endpoint, err := url.Parse(cfg.DoHURL)
+	if err != nil {
+		return nil, err
+	}
+	query := endpoint.Query()
+	query.Set("name", domain)
+	query.Set("type", "A")
+	endpoint.RawQuery = query.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/dns-json")
+	req.Header.Set("User-Agent", "SiteWatch/1.0")
+
+	client := &http.Client{Timeout: cfg.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("doh_http_%d", resp.StatusCode)
+	}
+
+	var data dohResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&data); err != nil {
+		return nil, err
+	}
+	var ips []string
+	for _, answer := range data.Answer {
+		if answer.Type == 1 && net.ParseIP(answer.Data).To4() != nil {
+			ips = appendUnique(ips, answer.Data)
+		}
+	}
+	if len(ips) == 0 {
+		return nil, errors.New("doh_no_a_record")
+	}
+	return ips, nil
+}
+
+func resolveUDP(ctx context.Context, cfg config, domain string) (string, error) {
+	ips, err := resolveUDPAll(ctx, cfg, domain)
+	if err != nil {
+		return "", err
+	}
+	return ips[0], nil
+}
+
+func resolveUDPAll(ctx context.Context, cfg config, domain string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+
+	server := cfg.DNSServer
+	if !strings.Contains(server, ":") {
+		server = net.JoinHostPort(server, "53")
+	}
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialer := net.Dialer{Timeout: cfg.Timeout}
+			return dialer.DialContext(ctx, "udp", server)
+		},
+	}
+	ips, err := resolver.LookupIPAddr(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, item := range ips {
+		if ip4 := item.IP.To4(); ip4 != nil {
+			out = appendUnique(out, ip4.String())
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("udp_no_a_record")
+	}
+	return out, nil
+}
+
+func appendUnique(items []string, value string) []string {
+	for _, item := range items {
+		if item == value {
+			return items
+		}
+	}
+	return append(items, value)
+}
+
+func anyIPOverlap(left []string, right []string) bool {
+	seen := map[string]bool{}
+	for _, item := range left {
+		seen[item] = true
+	}
+	for _, item := range right {
+		if seen[item] {
+			return true
+		}
+	}
+	return false
+}
+
+func probeTLS(ctx context.Context, cfg config, domain string, ip string, version uint16) tlsProbe {
+	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+
+	start := time.Now()
+	dialer := &net.Dialer{Timeout: cfg.Timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, "443"))
+	if err != nil {
+		return tlsProbe{Status: classifyProbeError(err), Time: cfg.Timeout.Seconds(), Detail: cleanDetail(err.Error())}
+	}
+	defer conn.Close()
+
+	tlsConn := tls.Client(conn, &tls.Config{
+		ServerName:         domain,
+		InsecureSkipVerify: true,
+		MinVersion:         version,
+		MaxVersion:         version,
+	})
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		return tlsProbe{Status: classifyProbeError(err), Time: time.Since(start).Seconds(), Detail: cleanDetail(err.Error())}
+	}
+	_, _ = tlsConn.Write([]byte("GET / HTTP/1.1\r\nHost: " + domain + "\r\nConnection: close\r\n\r\n"))
+	_, _ = io.CopyN(io.Discard, tlsConn, 1)
+	return tlsProbe{Status: "ok", Time: time.Since(start).Seconds(), Detail: tlsVersionLabel(version)}
+}
+
+func probeHTTP(ctx context.Context, cfg config, domain string, ip string) httpProbe {
+	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialer := net.Dialer{Timeout: cfg.Timeout}
+			return dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, "80"))
+		},
+		ResponseHeaderTimeout: cfg.Timeout,
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   cfg.Timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+domain+"/", nil)
+	if err != nil {
+		return httpProbe{Status: "error", Code: "000", Time: 0, Detail: cleanDetail(err.Error())}
+	}
+	req.Header.Set("User-Agent", "SiteWatch/1.0")
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	elapsed := time.Since(start).Seconds()
+	if err != nil {
+		return httpProbe{Status: classifyProbeError(err), Code: "000", Time: elapsed, Detail: cleanDetail(err.Error())}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	status := "ok"
+	detail := resp.Status
+	location := resp.Header.Get("Location")
+	if looksLikeISPBlock(location, string(body)) {
+		status = "isp_page"
+		detail = "block_marker_or_cross_redirect"
+	}
+	return httpProbe{Status: status, Code: fmt.Sprintf("%03d", resp.StatusCode), Time: elapsed, Detail: cleanDetail(detail)}
+}
+
+func valueOrError(value string, err error) string {
+	if err != nil {
+		return "error"
+	}
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func classifyProbeError(err error) string {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline"):
+		return "timeout"
+	case strings.Contains(msg, "reset"):
+		return "reset"
+	case strings.Contains(msg, "refused"):
+		return "refused"
+	case strings.Contains(msg, "certificate"):
+		return "mitm"
+	default:
+		return "error"
+	}
+}
+
+func cleanDetail(raw string) string {
+	raw = strings.ReplaceAll(raw, "\t", " ")
+	raw = strings.ReplaceAll(raw, "\r", " ")
+	raw = strings.ReplaceAll(raw, "\n", " ")
+	if len(raw) > 120 {
+		return raw[:120]
+	}
+	return raw
+}
+
+func tlsVersionLabel(version uint16) string {
+	if version == tls.VersionTLS13 {
+		return "tls1.3"
+	}
+	return "tls1.2"
+}
+
+func looksLikeISPBlock(location string, body string) bool {
+	lower := strings.ToLower(location + "\n" + body)
+	markers := []string{
+		"blocked",
+		"access denied",
+		"forbidden by",
+		"заблок",
+		"доступ огранич",
+		"решению суда",
+		"роскомнадзор",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func httpClient(cfg config, proxyRaw string) (*http.Client, error) {

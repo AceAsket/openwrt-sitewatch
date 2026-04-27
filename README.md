@@ -128,11 +128,14 @@ SITEWATCH_PIHOLE_LOOKBACK="600"
 SITEWATCH_PIHOLE_DISK="0"
 SITEWATCH_EXCLUDE_DOMAINS="connectivitycheck.gstatic.com connectivitycheck.android.com"
 SITEWATCH_CHECK_BASE_DOMAIN="1"
+SITEWATCH_DPI_DNS_SERVER="1.1.1.1"
+SITEWATCH_DPI_DOH_URL="https://cloudflare-dns.com/dns-query"
 ```
 
 Если v2rayA слушает другой порт, поменяй `SITEWATCH_PROXY`.
 `SITEWATCH_EXCLUDE_DOMAINS` не запрещает проверку домена в UI, но не дает служебным доменам автоматически попадать в VPN-выгрузку.
 `SITEWATCH_CHECK_BASE_DOMAIN=1` включает дополнительную проверку базового домена: если `static2.mangapoisk.io` выглядит заблокированным, сканер отдельно проверит `mangapoisk.io`.
+Ручная проверка URL также делает легкие DPI-пробы: сравнивает UDP DNS с DoH, проверяет TLS 1.3/TLS 1.2 напрямую к эталонному IP и делает HTTP probe на порт 80. `SITEWATCH_DPI_DNS_SERVER` и `SITEWATCH_DPI_DOH_URL` задают пару DNS-источников для сравнения.
 
 Для Pi-hole на отдельном хосте можно включить API-сбор:
 

@@ -267,6 +267,15 @@ manual_direct_code=""
 manual_direct_time=""
 manual_proxy_code=""
 manual_proxy_time=""
+manual_dns_status=""
+manual_dns_udp_ip=""
+manual_dns_doh_ip=""
+manual_tls13_status=""
+manual_tls13_time=""
+manual_tls12_status=""
+manual_tls12_time=""
+manual_http_status=""
+manual_http_code=""
 manual_added=""
 if [ -n "$manual_result" ]; then
 	manual_status="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "status" { print $2; exit }')"
@@ -277,6 +286,15 @@ if [ -n "$manual_result" ]; then
 	manual_direct_time="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "direct_time" { print $2; exit }')"
 	manual_proxy_code="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "proxy_code" { print $2; exit }')"
 	manual_proxy_time="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "proxy_time" { print $2; exit }')"
+	manual_dns_status="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "dns_status" { print $2; exit }')"
+	manual_dns_udp_ip="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "dns_udp_ip" { print $2; exit }')"
+	manual_dns_doh_ip="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "dns_doh_ip" { print $2; exit }')"
+	manual_tls13_status="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "tls13_status" { print $2; exit }')"
+	manual_tls13_time="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "tls13_time" { print $2; exit }')"
+	manual_tls12_status="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "tls12_status" { print $2; exit }')"
+	manual_tls12_time="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "tls12_time" { print $2; exit }')"
+	manual_http_status="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "http_status" { print $2; exit }')"
+	manual_http_code="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "http_code" { print $2; exit }')"
 	manual_added="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "added" { print $2; exit }')"
 fi
 manual_status_e="$(printf "%s" "$manual_status" | html_escape)"
@@ -287,6 +305,15 @@ manual_direct_code_e="$(printf "%s" "$manual_direct_code" | html_escape)"
 manual_direct_time_e="$(printf "%s" "$manual_direct_time" | html_escape)"
 manual_proxy_code_e="$(printf "%s" "$manual_proxy_code" | html_escape)"
 manual_proxy_time_e="$(printf "%s" "$manual_proxy_time" | html_escape)"
+manual_dns_status_e="$(printf "%s" "$manual_dns_status" | html_escape)"
+manual_dns_udp_ip_e="$(printf "%s" "$manual_dns_udp_ip" | html_escape)"
+manual_dns_doh_ip_e="$(printf "%s" "$manual_dns_doh_ip" | html_escape)"
+manual_tls13_status_e="$(printf "%s" "$manual_tls13_status" | html_escape)"
+manual_tls13_time_e="$(printf "%s" "$manual_tls13_time" | html_escape)"
+manual_tls12_status_e="$(printf "%s" "$manual_tls12_status" | html_escape)"
+manual_tls12_time_e="$(printf "%s" "$manual_tls12_time" | html_escape)"
+manual_http_status_e="$(printf "%s" "$manual_http_status" | html_escape)"
+manual_http_code_e="$(printf "%s" "$manual_http_code" | html_escape)"
 manual_added_e="$(printf "%s" "$manual_added" | html_escape)"
 
 printf "Content-Type: text/html; charset=utf-8\r\n\r\n"
@@ -436,6 +463,10 @@ cat <<EOF
 <div class="manual-metric"><span>Домен</span><b>$manual_domain_e</b></div>
 <div class="manual-metric"><span>Напрямую</span><b>$manual_direct_code_e / ${manual_direct_time_e}s</b></div>
 <div class="manual-metric"><span>Через v2rayA</span><b>$manual_proxy_code_e / ${manual_proxy_time_e}s</b></div>
+<div class="manual-metric"><span>DNS DPI</span><b>$manual_dns_status_e · UDP $manual_dns_udp_ip_e · DoH $manual_dns_doh_ip_e</b></div>
+<div class="manual-metric"><span>TLS 1.3</span><b>$manual_tls13_status_e / ${manual_tls13_time_e}s</b></div>
+<div class="manual-metric"><span>TLS 1.2</span><b>$manual_tls12_status_e / ${manual_tls12_time_e}s</b></div>
+<div class="manual-metric"><span>HTTP probe</span><b>$manual_http_status_e / $manual_http_code_e</b></div>
 <div class="manual-metric"><span>URL</span><b>$manual_checked_url_e</b></div>
 <div class="manual-metric"><span>VPN-список</span><b>$manual_added_e</b></div>
 EOF
@@ -695,6 +726,10 @@ cat <<'EOF'
     result.appendChild(metric('Домен', data.domain));
     result.appendChild(metric('Напрямую', text(data.direct_code) + ' / ' + text(data.direct_time) + 's'));
     result.appendChild(metric('Через v2rayA', text(data.proxy_code) + ' / ' + text(data.proxy_time) + 's'));
+    result.appendChild(metric('DNS DPI', text(data.dns_status) + ' · UDP ' + text(data.dns_udp_ip) + ' · DoH ' + text(data.dns_doh_ip)));
+    result.appendChild(metric('TLS 1.3', text(data.tls13_status) + ' / ' + text(data.tls13_time) + 's'));
+    result.appendChild(metric('TLS 1.2', text(data.tls12_status) + ' / ' + text(data.tls12_time) + 's'));
+    result.appendChild(metric('HTTP probe', text(data.http_status) + ' / ' + text(data.http_code)));
     result.appendChild(metric('URL', data.url));
     result.appendChild(metric('VPN-список', data.added || data.error || 'no'));
   }
