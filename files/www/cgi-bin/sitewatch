@@ -3,6 +3,7 @@
 CONF="/etc/sitewatch/sitewatch.conf"
 [ -f "$CONF" ] && . "$CONF"
 
+: "${SITEWATCH_VERSION:=v0.2.0}"
 : "${SITEWATCH_SEEN:=/etc/sitewatch/seen.tsv}"
 : "${SITEWATCH_RESULTS:=/etc/sitewatch/results.tsv}"
 : "${SITEWATCH_PROXY_OUT:=/etc/sitewatch/proxy-domains.txt}"
@@ -507,6 +508,7 @@ source_title="Все устройства"
 source_title_e="$(printf "%s" "$source_title" | html_escape)"
 source_filter_e="$(printf "%s" "$source_filter" | html_escape)"
 scan_workers_e="$(printf "%s" "$scan_workers" | html_escape)"
+sitewatch_version_e="$(printf "%s" "$SITEWATCH_VERSION" | html_escape)"
 manual_url_e="$(printf "%s" "$manual_url" | html_escape)"
 manual_status=""
 manual_status_text=""
@@ -590,7 +592,7 @@ main{max-width:1180px;margin:0 auto;padding:24px}
 .top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
 .brand{display:flex;align-items:center;gap:12px}.mark{width:42px;height:42px;border-radius:8px;background:#17202c;color:white;display:grid;place-items:center;font-weight:800;box-shadow:0 10px 24px rgba(23,32,44,.16)}
 h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-top:4px}
-.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.button{border:1px solid var(--line);background:var(--panel);border-radius:7px;color:var(--text);display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 11px;text-decoration:none;font-weight:650;box-shadow:0 1px 1px rgba(15,23,42,.04)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}.version{border:1px solid var(--line);border-radius:999px;padding:4px 8px;color:var(--muted);font-size:12px;font-weight:800;background:var(--panel)}.button{border:1px solid var(--line);background:var(--panel);border-radius:7px;color:var(--text);display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 11px;text-decoration:none;font-weight:650;box-shadow:0 1px 1px rgba(15,23,42,.04)}
 .button.primary{background:var(--blue);border-color:var(--blue);color:white}.button.warn{background:#fff7df;border-color:#f0d27a;color:#6f4a00}.button.danger{background:#fff0f1;border-color:#efb8be;color:#9f1d2a}.button:hover{border-color:#b7c2d1}
 .toolbar{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;margin-bottom:14px}.tool{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}
 .tool form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tool input,.tool select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}.capture-controls.running .capture-start-field,.capture-controls.running .capture-live-link{display:none}
@@ -647,6 +649,7 @@ button.button{font:inherit;cursor:pointer}
 <section class="top">
 <div class="brand"><div class="mark">SW</div><div><h1>SiteWatch</h1><div class="subtitle">Мониторинг блокировок по устройствам без постоянного DNS-логирования</div></div></div>
 <div class="actions">
+<span class="version">$sitewatch_version_e</span>
 <button class="button" id="themeToggle" type="button">Dark</button>
 </div>
 </section>
