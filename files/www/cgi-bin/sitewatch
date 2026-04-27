@@ -136,6 +136,13 @@ source_filter="$(safe_token "$(param source)")"
 duration="$(safe_token "$(param duration)")"
 manual_url="$(url_decode_light "$(param url)")"
 manual_add="$(safe_token "$(param add)")"
+status_filter="$(safe_token "$(param status_filter)")"
+domain_filter="$(url_decode_light "$(param domain_filter)")"
+count_min="$(safe_token "$(param count_min)")"
+direct_filter="$(url_decode_light "$(param direct_filter)")"
+proxy_filter="$(url_decode_light "$(param proxy_filter)")"
+dpi_filter="$(url_decode_light "$(param dpi_filter)")"
+scan_filter="$(url_decode_light "$(param scan_filter)")"
 [ -n "$duration" ] || duration=45
 source_q=""
 [ -n "$source_filter" ] && source_q="&source=$source_filter"
@@ -323,8 +330,8 @@ if [ -n "$scan_status" ]; then
 	scan_done="$(printf "%s" "$scan_status" | awk -F '\t' '{print $4}')"
 	scan_current="$(printf "%s" "$scan_status" | awk -F '\t' '{print $5}')"
 	scan_updated="$(printf "%s" "$scan_status" | awk -F '\t' '{print $6}')"
-	[ "$scan_state" = "running" ] && scan_label="Распознавание: $scan_done из $scan_total"
-	[ "$scan_state" = "done" ] && scan_label="Распознавание завершено: $scan_done из $scan_total"
+	[ "$scan_state" = "running" ] && scan_label="Распознавание пакета: $scan_done из $scan_total · всего ожидает: $unchecked_count"
+	[ "$scan_state" = "done" ] && scan_label="Пакет завершен: $scan_done из $scan_total · всего ожидает: $unchecked_count"
 	[ "$scan_state" = "error" ] && scan_label="Распознавание завершилось ошибкой"
 	if [ "${scan_total:-0}" -gt 0 ] 2>/dev/null; then
 		scan_percent=$((scan_done * 100 / scan_total))
@@ -360,6 +367,27 @@ source_title="Все устройства"
 source_title_e="$(printf "%s" "$source_title" | html_escape)"
 source_filter_e="$(printf "%s" "$source_filter" | html_escape)"
 manual_url_e="$(printf "%s" "$manual_url" | html_escape)"
+status_filter_e="$(printf "%s" "$status_filter" | html_escape)"
+domain_filter_e="$(printf "%s" "$domain_filter" | html_escape)"
+count_min_e="$(printf "%s" "$count_min" | html_escape)"
+direct_filter_e="$(printf "%s" "$direct_filter" | html_escape)"
+proxy_filter_e="$(printf "%s" "$proxy_filter" | html_escape)"
+dpi_filter_e="$(printf "%s" "$dpi_filter" | html_escape)"
+scan_filter_e="$(printf "%s" "$scan_filter" | html_escape)"
+status_all_selected=""
+status_blocked_selected=""
+status_slow_selected=""
+status_ok_selected=""
+status_proxy_failed_selected=""
+status_unchecked_selected=""
+case "$status_filter" in
+	blocked) status_blocked_selected=" selected" ;;
+	slow) status_slow_selected=" selected" ;;
+	ok) status_ok_selected=" selected" ;;
+	proxy_failed) status_proxy_failed_selected=" selected" ;;
+	unchecked) status_unchecked_selected=" selected" ;;
+	*) status_all_selected=" selected" ;;
+esac
 
 manual_status=""
 manual_status_text=""
@@ -456,10 +484,11 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .queue-actions{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
 .scan-progress{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:10px 12px;margin:-6px 0 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}.scan-progress[data-state=""]{display:none}.scan-text{font-weight:800}.scan-current{color:var(--muted);font-size:13px;word-break:break-word}.bar{height:6px;background:#e7edf5;border-radius:999px;overflow:hidden;grid-column:1/-1}.bar span{display:block;height:100%;width:0;background:var(--blue);transition:width .25s ease}
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
-.utility-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px}.utility-grid .source-panel{margin-bottom:0}.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.export-grid{display:grid;grid-template-columns:1fr;gap:8px}
+.utility-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px}.utility-grid .source-panel{margin-bottom:0}.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.export-grid{display:grid;grid-template-columns:1fr;gap:8px}.export-grid select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
 .source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:12px;background:rgba(255,255,255,.35)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
 .manual-panel form{display:grid;grid-template-columns:minmax(260px,1fr) auto auto;gap:10px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:38px;padding:8px 10px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}.manual-result:empty{display:none}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.35)}.manual-metric span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}.manual-dpi{grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:rgba(255,255,255,.25)}.manual-dpi summary{cursor:pointer;font-weight:800;color:var(--muted)}.manual-dpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-loading{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.manual-panel.loading .manual-loading{display:flex}.spinner{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
+.table-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);background:rgba(248,250,252,.72)}.table-filters input,.table-filters select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text);width:100%}.table-filters .button{width:100%}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 .status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}
 .domain{font-weight:750}.source,.metric{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.muted{color:var(--muted)}.empty{padding:28px;text-align:center;color:var(--muted)}
@@ -474,7 +503,7 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
 :root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel,:root[data-theme="dark"] .source-panel,:root[data-theme="dark"] .manual-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.24)}
 :root[data-theme="dark"] .source-card{background:#111821}
-:root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select,:root[data-theme="dark"] .manual-panel input[type="text"]{background:#0f1620;color:var(--text)}
+:root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select,:root[data-theme="dark"] .manual-panel input[type="text"],:root[data-theme="dark"] .table-filters input,:root[data-theme="dark"] .table-filters select,:root[data-theme="dark"] .export-grid select{background:#0f1620;color:var(--text)}
 :root[data-theme="dark"] .manual-metric,:root[data-theme="dark"] .manual-dpi{background:#111821}
 :root[data-theme="dark"] .chip.active{background:#e7edf5;color:#111821;border-color:#e7edf5}
 :root[data-theme="dark"] .chip.active small{color:#475569}
@@ -487,9 +516,10 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
+:root[data-theme="dark"] .table-filters{background:#111821}
 :root[data-theme="dark"] .scan-progress{background:var(--panel)}:root[data-theme="dark"] .bar{background:#202a37}
-@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-meta{justify-content:flex-start}.toolbar,.utility-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-panel form{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
-@media(max-width:560px){.summary,.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
+@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-meta{justify-content:flex-start}.toolbar,.utility-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.source-grid,.manual-result,.manual-dpi-grid,.table-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-panel form{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+@media(max-width:560px){.summary,.source-grid,.manual-result,.manual-dpi-grid,.table-filters{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
 </style>
 </head>
 <body>
@@ -615,16 +645,19 @@ cat <<EOF
 
 <div class="export-panel">
 <div class="tool-title">Выгрузка правил</div>
-<div class="export-grid">
-<a class="button" href="?action=export">Все проблемные</a>
-<a class="button" href="?action=export_blocked">Только заблокированные</a>
-<a class="button" href="?action=export_slow">Только замедленные</a>
-<a class="button" href="?action=export_v2raya">v2rayA: все</a>
-<a class="button" href="?action=export_v2raya_blocked">v2rayA: заблокированные</a>
-<a class="button" href="?action=export_v2raya_slow">v2rayA: замедленные</a>
-<a class="button" href="?action=export_base">Базовые домены</a>
-<a class="button" href="?action=export_v2raya_base">v2rayA base</a>
-</div>
+<form class="export-grid" method="get" action="">
+<select name="action">
+<option value="export">Все проблемные: domain</option>
+<option value="export_blocked">Заблокированные: domain</option>
+<option value="export_slow">Замедленные: domain</option>
+<option value="export_v2raya">Все проблемные: v2rayA</option>
+<option value="export_v2raya_blocked">Заблокированные: v2rayA</option>
+<option value="export_v2raya_slow">Замедленные: v2rayA</option>
+<option value="export_base">Базовые домены</option>
+<option value="export_v2raya_base">Базовые домены: v2rayA</option>
+</select>
+<button class="button" type="submit">Скачать</button>
+</form>
 </div>
 </section>
 
@@ -650,14 +683,55 @@ cat <<EOF
 
 <section class="panel">
 <div class="panel-head"><div class="panel-title">Домены: $source_title_e</div><div class="hint">Live-режим обновляет счетчики без перезагрузки страницы</div></div>
+<form class="table-filters" method="get" action="">
+<select name="status_filter">
+<option value=""$status_all_selected>Статус: все</option>
+<option value="blocked"$status_blocked_selected>заблокирован</option>
+<option value="slow"$status_slow_selected>замедлен</option>
+<option value="ok"$status_ok_selected>норма</option>
+<option value="proxy_failed"$status_proxy_failed_selected>proxy fail</option>
+<option value="unchecked"$status_unchecked_selected>ожидает</option>
+</select>
+<input name="domain_filter" value="$domain_filter_e" placeholder="Домен содержит">
+<input name="source" value="$source_filter_e" placeholder="Источник">
+<input name="count_min" value="$count_min_e" placeholder="Запросов от">
+<input name="direct_filter" value="$direct_filter_e" placeholder="Напрямую содержит">
+<input name="proxy_filter" value="$proxy_filter_e" placeholder="v2rayA содержит">
+<input name="dpi_filter" value="$dpi_filter_e" placeholder="DPI содержит">
+<input name="scan_filter" value="$scan_filter_e" placeholder="Скан содержит">
+<button class="button primary" type="submit">Фильтровать</button>
+<a class="button" href="?">Сбросить</a>
+</form>
 <table>
 <thead><tr><th>Статус</th><th>Домен</th><th>Источник</th><th>Запросов</th><th>Напрямую</th><th>Через v2rayA</th><th>DPI</th><th>Скан</th></tr></thead>
 <tbody>
 EOF
 
 rows="$(
-awk -F '\t' -v source_filter="$source_filter" '
+awk -F '\t' \
+	-v source_filter="$source_filter" \
+	-v status_filter="$status_filter" \
+	-v domain_filter="$domain_filter" \
+	-v count_min="$count_min" \
+	-v direct_filter="$direct_filter" \
+	-v proxy_filter="$proxy_filter" \
+	-v dpi_filter="$dpi_filter" \
+	-v scan_filter="$scan_filter" '
 	BEGIN { OFS = "\t"; }
+	function contains(haystack, needle) {
+		return needle == "" || index(tolower(haystack), tolower(needle)) > 0;
+	}
+	function allowed(status, domain, source, count, direct, proxy, dpi, scanned) {
+		if (status_filter != "" && status != status_filter) return 0;
+		if (!contains(domain, domain_filter)) return 0;
+		if (source_filter != "" && source != source_filter) return 0;
+		if (count_min != "" && count + 0 < count_min + 0) return 0;
+		if (!contains(direct, direct_filter)) return 0;
+		if (!contains(proxy, proxy_filter)) return 0;
+		if (!contains(dpi, dpi_filter)) return 0;
+		if (!contains(scanned, scan_filter)) return 0;
+		return 1;
+	}
 	FNR == NR {
 		if (source_filter == "" || $1 == source_filter) {
 			source[$2] = $1;
@@ -668,13 +742,16 @@ awk -F '\t' -v source_filter="$source_filter" '
 	{
 		domain = $1;
 		if (source_filter == "" || $2 == source_filter) {
-			print $4, domain, $2, $3, $5 " / " $6 " с", $7 " / " $8 " с", $10, $9;
+			dpi = (NF >= 10 && $10 != "") ? $10 : "-";
+			direct = $5 " / " $6 " с";
+			proxy = $7 " / " $8 " с";
+			if (allowed($4, domain, $2, $3, direct, proxy, dpi, $9)) print $4, domain, $2, $3, direct, proxy, dpi, $9;
 			done[domain] = 1;
 		}
 	}
 	END {
 		for (domain in queries) {
-			if (!(domain in done)) print "unchecked", domain, source[domain], queries[domain], "-", "-", "-", "";
+			if (!(domain in done) && allowed("unchecked", domain, source[domain], queries[domain], "-", "-", "-", "")) print "unchecked", domain, source[domain], queries[domain], "-", "-", "-", "";
 		}
 	}
 ' "$SITEWATCH_SEEN" "$SITEWATCH_RESULTS" 2>/dev/null | sort -t "	" -k1,1 -k4,4nr | head -n 250
@@ -798,8 +875,9 @@ cat <<'EOF'
     if (scanMode) scanMode.textContent = modeLabels[state] || state || 'ожидает';
     if (scanCurrent) scanCurrent.textContent = current ? 'Сейчас: ' + current : '';
     if (scanText) {
-      if (state === 'running') scanText.textContent = 'Распознавание: ' + done + ' из ' + total;
-      else if (state === 'done') scanText.textContent = 'Распознавание завершено: ' + done + ' из ' + total;
+      var pending = Math.max(0, parseInt(seen && seen.textContent || '0', 10) - parseInt(results && results.textContent || '0', 10));
+      if (state === 'running') scanText.textContent = 'Распознавание пакета: ' + done + ' из ' + total + ' · всего ожидает: ' + pending;
+      else if (state === 'done') scanText.textContent = 'Пакет завершен: ' + done + ' из ' + total + ' · всего ожидает: ' + pending;
       else if (state === 'error') scanText.textContent = 'Распознавание завершилось ошибкой';
       else scanText.textContent = 'Распознавание не запущено';
     }
