@@ -90,10 +90,10 @@ chmod +x install-openwrt.sh
 Открыть:
 
 ```text
-http://192.168.1.1:8095/cgi-bin/sitewatch
+http://192.168.1.1:8095/
 ```
 
-Установщик создает отдельный `uhttpd` instance `uhttpd.sitewatch` на порту `8095`, чтобы не смешивать SiteWatch с основной админкой OpenWrt/LuCI. CGI ставится только в `/www/sitewatch/cgi-bin/sitewatch`.
+Установщик создает отдельный `uhttpd` instance `uhttpd.sitewatch` на порту `8095`, чтобы не смешивать SiteWatch с основной админкой OpenWrt/LuCI. CGI ставится в `/www/sitewatch/cgi-bin/sitewatch`, а корень порта открывает его как index.
 
 Пример секции:
 
@@ -101,6 +101,7 @@ http://192.168.1.1:8095/cgi-bin/sitewatch
 uhttpd.sitewatch.home='/www/sitewatch'
 uhttpd.sitewatch.listen_http='0.0.0.0:8095'
 uhttpd.sitewatch.cgi_prefix='/cgi-bin'
+uhttpd.sitewatch.index_page='cgi-bin/sitewatch'
 ```
 
 Если CGI выключен, проверь `/etc/config/uhttpd`: должна быть секция/параметры CGI для `/cgi-bin`.
@@ -252,13 +253,13 @@ domain:myminifactory.com
 Открыть UI с конкретным источником:
 
 ```text
-http://192.168.50.1:8080/cgi-bin/sitewatch?source=192.168.50.105
+http://192.168.50.1:8095/?source=192.168.50.105
 ```
 
 Запустить скан только для него:
 
 ```text
-http://192.168.50.1:8080/cgi-bin/sitewatch?action=scan&source=192.168.50.105
+http://192.168.50.1:8095/?action=scan&source=192.168.50.105
 ```
 
 ## Cron
@@ -326,10 +327,10 @@ domain:youmagine.com
 Дополнительные выгрузки из UI:
 
 ```text
-/cgi-bin/sitewatch?action=export
-/cgi-bin/sitewatch?action=export_base
-/cgi-bin/sitewatch?action=export_v2raya
-/cgi-bin/sitewatch?action=export_v2raya_base
+/?action=export
+/?action=export_base
+/?action=export_v2raya
+/?action=export_v2raya_base
 ```
 
 `export_v2raya` отдаёт строки для вставки в веб-интерфейс v2rayA:

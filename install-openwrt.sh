@@ -43,6 +43,8 @@ if command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/uhttpd ]; then
 	uci set uhttpd.sitewatch.home='/www/sitewatch'
 	uci set uhttpd.sitewatch.listen_http='0.0.0.0:8095'
 	uci set uhttpd.sitewatch.cgi_prefix='/cgi-bin'
+	uci -q delete uhttpd.sitewatch.index_page || true
+	uci add_list uhttpd.sitewatch.index_page='cgi-bin/sitewatch'
 	uci set uhttpd.sitewatch.script_timeout='3600'
 	uci set uhttpd.sitewatch.network_timeout='30'
 	uci set uhttpd.sitewatch.http_keepalive='20'
@@ -51,6 +53,6 @@ if command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/uhttpd ]; then
 	/etc/init.d/uhttpd restart
 fi
 
-echo "Installed. Open: http://<router-ip>:8095/cgi-bin/sitewatch"
+echo "Installed. Open: http://<router-ip>:8095/"
 echo "Needed packages for shell fallback and Pi-hole API: curl ca-bundle."
 echo "If a matching dist/sitewatch-linux-* binary was present, scan/check-url use /usr/bin/sitewatch without curl."

@@ -410,18 +410,18 @@ button.button{font:inherit;cursor:pointer}
 <section class="toolbar">
 <div class="tool">
 <div class="tool-title">Проверка устройства</div>
-<form method="get" action="/cgi-bin/sitewatch">
+<form method="get" action="">
 <input type="hidden" name="action" value="scan">
 <label>Источник</label>
 <input name="source" value="$source_filter_e" placeholder="192.168.50.105">
 <button class="button primary" type="submit">Сканировать устройство</button>
-<a class="button" href="/cgi-bin/sitewatch">Сбросить фильтр</a>
+<a class="button" href="?">Сбросить фильтр</a>
 </form>
 <div class="capture">$capture_text</div>
 </div>
 <div class="tool">
 <div class="tool-title">Окно наблюдения</div>
-<form method="get" action="/cgi-bin/sitewatch">
+<form method="get" action="">
 <input type="hidden" name="action" value="capture">
 <select name="duration"><option value="30">30 сек</option><option value="45" selected>45 сек</option><option value="90">90 сек</option><option value="180">180 сек</option><option value="300">300 сек</option></select>
 <button class="button warn" type="submit">Запустить</button>
@@ -447,7 +447,7 @@ button.button{font:inherit;cursor:pointer}
 
 <section class="manual-panel">
 <div class="tool-title">Ручная проверка URL</div>
-<form method="get" action="/cgi-bin/sitewatch" id="manualCheckForm">
+<form method="get" action="" id="manualCheckForm">
 <input type="hidden" name="action" value="manual_check">
 <input type="text" name="url" value="$manual_url_e" placeholder="https://youmagine.com/">
 <label class="checkline"><input type="checkbox" name="add" value="1"> добавить в VPN-список при блокировке</label>
@@ -510,7 +510,7 @@ cat <<EOF
 </section>
 
 <nav class="sources">
-<a class="chip" href="/cgi-bin/sitewatch">Все устройства</a>
+<a class="chip" href="?">Все устройства</a>
 EOF
 
 awk -F '\t' '{
@@ -609,6 +609,7 @@ cat <<'EOF'
 </script>
 <script>
 (function(){
+  var endpoint = window.location.pathname || '/';
   var banner = document.getElementById('captureBanner');
   var timer = document.getElementById('captureTimer');
   var mode = document.getElementById('captureMode');
@@ -668,7 +669,7 @@ cat <<'EOF'
   setInterval(render, 1000);
   if (banner && banner.getAttribute('data-state') === 'running') {
     setInterval(function(){
-      var url = '/cgi-bin/sitewatch?action=status' + (source ? '&source=' + encodeURIComponent(source) : '');
+      var url = endpoint + '?action=status' + (source ? '&source=' + encodeURIComponent(source) : '');
       fetch(url, {cache:'no-store'}).then(function(resp){ return resp.text(); }).then(function(text){
         var data = parseStatus(text);
         if (data.capture) setCapture(data.capture);
@@ -683,6 +684,7 @@ cat <<'EOF'
 </script>
 <script>
 (function(){
+  var endpoint = window.location.pathname || '/';
   var form = document.getElementById('manualCheckForm');
   var panel = form ? form.closest('.manual-panel') : null;
   var result = document.getElementById('manualResult');
@@ -771,13 +773,13 @@ cat <<'EOF'
     result.textContent = '';
     var button = form.querySelector('button[type="submit"]');
     if (button) button.disabled = true;
-    fetch('/cgi-bin/sitewatch?' + params.toString(), {cache:'no-store'})
+    fetch(endpoint + '?' + params.toString(), {cache:'no-store'})
       .then(function(resp){ return resp.text(); })
       .then(function(body){
         var data = parseTSV(body);
         render(data);
         if ((data.added === 'yes' || data.added === 'already') && proxyTotal) {
-          fetch('/cgi-bin/sitewatch?action=status', {cache:'no-store'})
+          fetch(endpoint + '?action=status', {cache:'no-store'})
             .then(function(resp){ return resp.text(); })
             .then(function(text){
               var status = parseTSV(text.replace(/=/g, '\t'));
