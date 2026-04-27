@@ -16,6 +16,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_SLOW_RATIO:=3}"
 : "${SITEWATCH_SOURCE_FILTER:=}"
 : "${SITEWATCH_FORCE_RESCAN:=0}"
+: "${SITEWATCH_EXCLUDE_DOMAINS:=connectivitycheck.gstatic.com connectivitycheck.android.com}"
 
 mkdir -p "$(dirname "$SITEWATCH_RESULTS")"
 touch "$SITEWATCH_QUEUE" "$SITEWATCH_RESULTS" "$SITEWATCH_PROXY_OUT"
@@ -107,6 +108,16 @@ classify() {
 	'
 }
 
+domain_is_excluded() {
+	check_domain="$1"
+	for excluded in $SITEWATCH_EXCLUDE_DOMAINS; do
+		case "$check_domain" in
+			"$excluded"|*."$excluded") return 0 ;;
+		esac
+	done
+	return 1
+}
+
 new="/tmp/sitewatch-results.$$"
 cp "$SITEWATCH_RESULTS" "$new"
 
@@ -126,7 +137,7 @@ while IFS="$(printf '\t')" read -r source domain count; do
 	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
 		"$domain" "$source" "$count" "$status" "$direct_code" "$direct_time" "$proxy_code" "$proxy_time" "$now" >> "$new"
 
-	if [ "$status" = "blocked" ] || [ "$status" = "slow" ]; then
+	if { [ "$status" = "blocked" ] || [ "$status" = "slow" ]; } && ! domain_is_excluded "$domain"; then
 		grep -qx "domain:$domain" "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo "domain:$domain" >> "$SITEWATCH_PROXY_OUT"
 	fi
 done < "$todo"

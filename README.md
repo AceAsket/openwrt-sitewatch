@@ -60,9 +60,11 @@ SITEWATCH_BATCH="12"
 SITEWATCH_TIMEOUT="7"
 SITEWATCH_SLOW_SECONDS="5"
 SITEWATCH_SLOW_RATIO="3"
+SITEWATCH_EXCLUDE_DOMAINS="connectivitycheck.gstatic.com connectivitycheck.android.com"
 ```
 
 Если v2rayA слушает другой порт, поменяй `SITEWATCH_PROXY`.
+`SITEWATCH_EXCLUDE_DOMAINS` не запрещает проверку домена в UI, но не дает служебным доменам автоматически попадать в VPN-выгрузку.
 
 Примеры:
 
