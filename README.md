@@ -158,6 +158,18 @@ sitewatch-collect
 sitewatch-scan
 ```
 
+Разово проверить конкретный URL напрямую и через v2rayA:
+
+```sh
+sitewatch-check-url https://youmagine.com/
+```
+
+Добавить домен в VPN-выгрузку, если проверка покажет `blocked` или `slow`:
+
+```sh
+sitewatch-check-url --add https://youmagine.com/
+```
+
 Проверить только одно устройство:
 
 ```sh

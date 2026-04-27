@@ -1,6 +1,7 @@
 param(
     [string[]]$Paths = @(
         "files/www/cgi-bin/sitewatch",
+        "files/usr/bin/sitewatch-check-url",
         "README.md"
     )
 )

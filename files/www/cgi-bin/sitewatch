@@ -9,6 +9,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_SCAN_BIN:=/usr/bin/sitewatch-scan}"
 : "${SITEWATCH_COLLECT_BIN:=/usr/bin/sitewatch-collect}"
 : "${SITEWATCH_CAPTURE_BIN:=/usr/bin/sitewatch-capture}"
+: "${SITEWATCH_CHECK_URL_BIN:=/usr/bin/sitewatch-check-url}"
 : "${SITEWATCH_CAPTURE_STATUS:=/tmp/sitewatch-capture.status}"
 : "${SITEWATCH_CAPTURE_LOCK:=/tmp/sitewatch-capture.lock}"
 : "${SITEWATCH_PIHOLE_API_ENABLED:=0}"
@@ -27,6 +28,22 @@ param() {
 
 safe_token() {
 	printf "%s" "$1" | sed 's/%2E/./g; s/%2e/./g' | awk '/^[A-Za-z0-9_.:-]+$/ { print; exit }'
+}
+
+url_decode_light() {
+	printf "%s" "$1" | sed \
+		-e 's/+/ /g' \
+		-e 's/%3A/:/Ig' \
+		-e 's/%2F/\//Ig' \
+		-e 's/%3F/?/Ig' \
+		-e 's/%3D/=/Ig' \
+		-e 's/%26/\&/Ig' \
+		-e 's/%23/#/Ig' \
+		-e 's/%25/%/Ig' \
+		-e 's/%2E/./Ig' \
+		-e 's/%2D/-/Ig' \
+		-e 's/%5F/_/Ig' \
+		-e 's/%7E/~/Ig'
 }
 
 base_domain() {
@@ -76,9 +93,12 @@ status_label() {
 action="$(param action)"
 source_filter="$(safe_token "$(param source)")"
 duration="$(safe_token "$(param duration)")"
+manual_url="$(url_decode_light "$(param url)")"
+manual_add="$(safe_token "$(param add)")"
 [ -n "$duration" ] || duration=45
 source_q=""
 [ -n "$source_filter" ] && source_q="&source=$source_filter"
+manual_result=""
 
 case "$action" in
 	capture)
@@ -110,6 +130,15 @@ case "$action" in
 			SITEWATCH_SOURCE_FILTER="$source_filter" SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1
 		else
 			SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1
+		fi
+		;;
+	manual_check)
+		if [ -n "$manual_url" ]; then
+			if [ "$manual_add" = "1" ]; then
+				manual_result="$("$SITEWATCH_CHECK_URL_BIN" --add "$manual_url" 2>/dev/null || true)"
+			else
+				manual_result="$("$SITEWATCH_CHECK_URL_BIN" "$manual_url" 2>/dev/null || true)"
+			fi
 		fi
 		;;
 	export)
@@ -202,6 +231,37 @@ source_title="Все устройства"
 [ -n "$source_filter" ] && source_title="$source_filter"
 source_title_e="$(printf "%s" "$source_title" | html_escape)"
 source_filter_e="$(printf "%s" "$source_filter" | html_escape)"
+manual_url_e="$(printf "%s" "$manual_url" | html_escape)"
+
+manual_status=""
+manual_status_text=""
+manual_domain=""
+manual_checked_url=""
+manual_direct_code=""
+manual_direct_time=""
+manual_proxy_code=""
+manual_proxy_time=""
+manual_added=""
+if [ -n "$manual_result" ]; then
+	manual_status="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "status" { print $2; exit }')"
+	manual_status_text="$(status_label "$manual_status")"
+	manual_domain="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "domain" { print $2; exit }')"
+	manual_checked_url="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "url" { print $2; exit }')"
+	manual_direct_code="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "direct_code" { print $2; exit }')"
+	manual_direct_time="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "direct_time" { print $2; exit }')"
+	manual_proxy_code="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "proxy_code" { print $2; exit }')"
+	manual_proxy_time="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "proxy_time" { print $2; exit }')"
+	manual_added="$(printf "%s\n" "$manual_result" | awk -F '\t' '$1 == "added" { print $2; exit }')"
+fi
+manual_status_e="$(printf "%s" "$manual_status" | html_escape)"
+manual_status_text_e="$(printf "%s" "$manual_status_text" | html_escape)"
+manual_domain_e="$(printf "%s" "$manual_domain" | html_escape)"
+manual_checked_url_e="$(printf "%s" "$manual_checked_url" | html_escape)"
+manual_direct_code_e="$(printf "%s" "$manual_direct_code" | html_escape)"
+manual_direct_time_e="$(printf "%s" "$manual_direct_time" | html_escape)"
+manual_proxy_code_e="$(printf "%s" "$manual_proxy_code" | html_escape)"
+manual_proxy_time_e="$(printf "%s" "$manual_proxy_time" | html_escape)"
+manual_added_e="$(printf "%s" "$manual_added" | html_escape)"
 
 printf "Content-Type: text/html; charset=utf-8\r\n\r\n"
 cat <<EOF
@@ -238,7 +298,8 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .health{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:16px}.pill-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.pill-card b{font-size:18px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
 .export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.export-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.source-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.45)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
+.source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.45)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
+.manual-panel form{display:grid;grid-template-columns:minmax(220px,1fr) auto auto;gap:8px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:9px;background:rgba(255,255,255,.45)}.manual-metric span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 .status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}
@@ -251,9 +312,10 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .button.warn{background:#2b2414;border-color:#7a5a1c;color:#ffd37a}
 :root[data-theme="dark"] .button.danger{background:#301b20;border-color:#7b3440;color:#ffb3bb}
 :root[data-theme="dark"] .button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-:root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .pill-card,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel,:root[data-theme="dark"] .source-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
+:root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .pill-card,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel,:root[data-theme="dark"] .source-panel,:root[data-theme="dark"] .manual-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
 :root[data-theme="dark"] .source-card{background:#111821}
-:root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select{background:#0f1620;color:var(--text)}
+:root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select,:root[data-theme="dark"] .manual-panel input[type="text"]{background:#0f1620;color:var(--text)}
+:root[data-theme="dark"] .manual-metric{background:#111821}
 :root[data-theme="dark"] .chip.active{background:#e7edf5;color:#111821;border-color:#e7edf5}
 :root[data-theme="dark"] .chip.active small{color:#475569}
 :root[data-theme="dark"] th{background:var(--panel2);color:var(--muted)}
@@ -265,8 +327,8 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
-@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-actions,.capture-meta{justify-content:flex-start}.toolbar{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.health{grid-template-columns:repeat(2,minmax(0,1fr))}.export-grid,.source-grid{grid-template-columns:repeat(2,minmax(0,1fr))}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
-@media(max-width:560px){.summary,.health,.export-grid,.source-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
+@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-actions,.capture-meta{justify-content:flex-start}.toolbar{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.health{grid-template-columns:repeat(2,minmax(0,1fr))}.export-grid,.source-grid,.manual-result{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-panel form{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+@media(max-width:560px){.summary,.health,.export-grid,.source-grid,.manual-result{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
 </style>
 </head>
 <body>
@@ -326,6 +388,32 @@ button.button{font:inherit;cursor:pointer}
 <div class="pill-card"><span><span class="dot ok"></span>Норма</span><b>$ok_count</b></div>
 <div class="pill-card"><span><span class="dot proxy_failed"></span>Proxy fail</span><b>$failed_count</b></div>
 <div class="pill-card"><span><span class="dot unchecked"></span>Ожидают</span><b>$unchecked_count</b></div>
+</section>
+
+<section class="manual-panel">
+<div class="tool-title">Ручная проверка URL</div>
+<form method="get" action="/cgi-bin/sitewatch">
+<input type="hidden" name="action" value="manual_check">
+<input type="text" name="url" value="$manual_url_e" placeholder="https://youmagine.com/">
+<label class="checkline"><input type="checkbox" name="add" value="1"> добавить в VPN-список при блокировке</label>
+<button class="button primary" type="submit">Проверить URL</button>
+</form>
+EOF
+
+if [ -n "$manual_result" ]; then
+cat <<EOF
+<div class="manual-result">
+<div class="manual-metric"><span>Статус</span><b><span class="status $manual_status_e">$manual_status_text_e</span></b></div>
+<div class="manual-metric"><span>Домен</span><b>$manual_domain_e</b></div>
+<div class="manual-metric"><span>Напрямую</span><b>$manual_direct_code_e / ${manual_direct_time_e}s</b></div>
+<div class="manual-metric"><span>Через v2rayA</span><b>$manual_proxy_code_e / ${manual_proxy_time_e}s</b></div>
+<div class="manual-metric"><span>URL</span><b>$manual_checked_url_e</b></div>
+<div class="manual-metric"><span>VPN-список</span><b>$manual_added_e</b></div>
+</div>
+EOF
+fi
+
+cat <<EOF
 </section>
 
 <section class="source-panel">

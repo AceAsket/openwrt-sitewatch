@@ -1,0 +1,138 @@
+#!/bin/ash
+set -eu
+
+CONF="/etc/sitewatch/sitewatch.conf"
+[ -f "$CONF" ] && . "$CONF"
+
+: "${SITEWATCH_PROXY:=socks5h://127.0.0.1:20170}"
+: "${SITEWATCH_PROXY_OUT:=/etc/sitewatch/proxy-domains.txt}"
+: "${SITEWATCH_TIMEOUT:=7}"
+: "${SITEWATCH_SLOW_SECONDS:=5}"
+: "${SITEWATCH_SLOW_RATIO:=3}"
+: "${SITEWATCH_EXCLUDE_DOMAINS:=connectivitycheck.gstatic.com connectivitycheck.android.com}"
+
+add_to_proxy="0"
+case "${1:-}" in
+	--add)
+		add_to_proxy="1"
+		shift
+		;;
+esac
+
+input="${1:-}"
+
+html_url="$input"
+case "$input" in
+	http://*|https://*) url="$input" ;;
+	*) url="https://$input" ;;
+esac
+
+case "$url" in
+	http://*|https://*) ;;
+	*)
+		printf "status\terror\nerror\tunsupported_scheme\n"
+		exit 1
+		;;
+esac
+
+host="${url#http://}"
+host="${host#https://}"
+host="${host%%/*}"
+host="${host%%\?*}"
+host="${host%%#*}"
+host="${host##*@}"
+host="${host%%:*}"
+host="$(printf "%s" "$host" | tr 'A-Z' 'a-z')"
+
+if ! printf "%s" "$host" | awk '/^[a-z0-9.-]+\.[a-z0-9-]+$/ { ok=1 } END { exit ok ? 0 : 1 }'; then
+	printf "status\terror\nerror\tbad_domain\nurl\t%s\ndomain\t%s\n" "$html_url" "$host"
+	exit 1
+fi
+
+mkdir -p "$(dirname "$SITEWATCH_PROXY_OUT")"
+touch "$SITEWATCH_PROXY_OUT"
+
+measure() {
+	check_url="$1"
+	proxy="$2"
+	if [ -n "$proxy" ]; then
+		out="$(curl -L -o /dev/null -sS \
+			--proxy "$proxy" \
+			--connect-timeout "$SITEWATCH_TIMEOUT" \
+			--max-time "$SITEWATCH_TIMEOUT" \
+			-w "%{http_code}\t%{time_total}" \
+			"$check_url" 2>/dev/null)" || {
+				printf "000\t%s" "$SITEWATCH_TIMEOUT"
+				return
+			}
+	else
+		out="$(curl -L -o /dev/null -sS \
+			--connect-timeout "$SITEWATCH_TIMEOUT" \
+			--max-time "$SITEWATCH_TIMEOUT" \
+			-w "%{http_code}\t%{time_total}" \
+			"$check_url" 2>/dev/null)" || {
+				printf "000\t%s" "$SITEWATCH_TIMEOUT"
+				return
+			}
+	fi
+	printf "%s" "$out"
+}
+
+classify() {
+	direct_code="$1"
+	direct_time="$2"
+	proxy_code="$3"
+	proxy_time="$4"
+
+	awk -v dc="$direct_code" -v dt="$direct_time" -v pc="$proxy_code" -v pt="$proxy_time" \
+		-v slow_s="$SITEWATCH_SLOW_SECONDS" -v ratio="$SITEWATCH_SLOW_RATIO" '
+		BEGIN {
+			if (pc == "000") {
+				print "proxy_failed";
+			} else if (dc == "000" && pc != "000") {
+				print "blocked";
+			} else if (dc != "000" && pc != "000" && dt >= slow_s && dt >= (pt * ratio)) {
+				print "slow";
+			} else {
+				print "ok";
+			}
+		}
+	'
+}
+
+domain_is_excluded() {
+	check_domain="$1"
+	for excluded in $SITEWATCH_EXCLUDE_DOMAINS; do
+		case "$check_domain" in
+			"$excluded"|*."$excluded") return 0 ;;
+		esac
+	done
+	return 1
+}
+
+direct="$(measure "$url" "")"
+proxy="$(measure "$url" "$SITEWATCH_PROXY")"
+direct_code="$(printf "%s" "$direct" | awk -F '\t' '{print $1}')"
+direct_time="$(printf "%s" "$direct" | awk -F '\t' '{print $2}')"
+proxy_code="$(printf "%s" "$proxy" | awk -F '\t' '{print $1}')"
+proxy_time="$(printf "%s" "$proxy" | awk -F '\t' '{print $2}')"
+status="$(classify "$direct_code" "$direct_time" "$proxy_code" "$proxy_time")"
+added="no"
+
+if [ "$add_to_proxy" = "1" ] && { [ "$status" = "blocked" ] || [ "$status" = "slow" ]; } && ! domain_is_excluded "$host"; then
+	if grep -qx "domain:$host" "$SITEWATCH_PROXY_OUT" 2>/dev/null; then
+		added="already"
+	else
+		echo "domain:$host" >> "$SITEWATCH_PROXY_OUT"
+		added="yes"
+	fi
+fi
+
+printf "status\t%s\n" "$status"
+printf "url\t%s\n" "$url"
+printf "domain\t%s\n" "$host"
+printf "direct_code\t%s\n" "$direct_code"
+printf "direct_time\t%s\n" "$direct_time"
+printf "proxy_code\t%s\n" "$proxy_code"
+printf "proxy_time\t%s\n" "$proxy_time"
+printf "added\t%s\n" "$added"
