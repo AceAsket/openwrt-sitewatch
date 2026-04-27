@@ -328,12 +328,16 @@ domain:youmagine.com
 
 ```text
 /?action=export
+/?action=export_blocked
+/?action=export_slow
 /?action=export_base
 /?action=export_v2raya
+/?action=export_v2raya_blocked
+/?action=export_v2raya_slow
 /?action=export_v2raya_base
 ```
 
-`export_v2raya` отдаёт строки для вставки в веб-интерфейс v2rayA:
+`export` отдаёт все проблемные домены (`blocked` + `slow`), `export_blocked` только заблокированные, `export_slow` только замедленные. `export_v2raya*` отдаёт строки для вставки в веб-интерфейс v2rayA:
 
 ```text
 domain(domain: yummyani.me) -> proxy

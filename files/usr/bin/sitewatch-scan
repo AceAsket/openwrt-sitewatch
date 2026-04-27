@@ -10,6 +10,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_RESULTS:=/etc/sitewatch/results.tsv}"
 : "${SITEWATCH_PROXY_OUT:=/etc/sitewatch/proxy-domains.txt}"
 : "${SITEWATCH_LOCK:=/tmp/sitewatch-scan.lock}"
+: "${SITEWATCH_SCAN_STATUS:=/tmp/sitewatch-scan.status}"
 : "${SITEWATCH_PROXY:=socks5h://127.0.0.1:20170}"
 : "${SITEWATCH_BATCH:=12}"
 : "${SITEWATCH_TIMEOUT:=7}"
@@ -33,6 +34,10 @@ if ! mkdir "$SITEWATCH_LOCK" 2>/dev/null; then
 	exit 0
 fi
 trap 'rmdir "$SITEWATCH_LOCK" 2>/dev/null || true; rm -f /tmp/sitewatch-*.$$' EXIT
+
+scan_status() {
+	printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$1" "$now" "$2" "$3" "$4" "$(date +%s)" > "$SITEWATCH_SCAN_STATUS"
+}
 
 now="$(date +%s)"
 todo="/tmp/sitewatch-todo.$$"
@@ -66,6 +71,10 @@ awk -v now="$now" -v min_rescan="$SITEWATCH_MIN_RESCAN" -v source_filter="$SITEW
 		}
 	}
 ' "$last" "$SITEWATCH_QUEUE" | sort -t "	" -k3,3nr | head -n "$SITEWATCH_BATCH" > "$todo"
+
+todo_total="$(wc -l < "$todo" 2>/dev/null || echo 0)"
+todo_done=0
+scan_status running "$todo_total" 0 ""
 
 measure() {
 	url="$1"
@@ -156,8 +165,8 @@ write_result() {
 
 	awk -v d="$result_domain" 'BEGIN{FS=OFS="\t"} $1 != d {print}' "$new" > "$new.tmp"
 	mv "$new.tmp" "$new"
-	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-		"$result_domain" "$result_source" "$result_count" "$result_status" "$result_direct_code" "$result_direct_time" "$result_proxy_code" "$result_proxy_time" "$now" >> "$new"
+	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+		"$result_domain" "$result_source" "$result_count" "$result_status" "$result_direct_code" "$result_direct_time" "$result_proxy_code" "$result_proxy_time" "$now" "-" >> "$new"
 }
 
 maybe_add_proxy_domain() {
@@ -173,6 +182,7 @@ cp "$SITEWATCH_RESULTS" "$new"
 
 while IFS="$(printf '\t')" read -r source domain count; do
 	[ -n "${domain:-}" ] || continue
+	scan_status running "$todo_total" "$todo_done" "$domain"
 	url="https://$domain/"
 	direct="$(measure "$url" "")"
 	proxy="$(measure "$url" "$SITEWATCH_PROXY")"
@@ -200,6 +210,9 @@ while IFS="$(printf '\t')" read -r source domain count; do
 			maybe_add_proxy_domain "$base" "$base_status"
 		fi
 	fi
+	todo_done=$((todo_done + 1))
+	scan_status running "$todo_total" "$todo_done" "$domain"
 done < "$todo"
 
 sort -t "	" -k4,4 -k1,1 "$new" > "$SITEWATCH_RESULTS"
+scan_status done "$todo_total" "$todo_done" ""

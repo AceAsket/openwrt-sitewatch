@@ -26,6 +26,7 @@ type config struct {
 	Results         string
 	ProxyOut        string
 	Lock            string
+	ScanStatus      string
 	Proxy           string
 	Batch           int
 	Timeout         time.Duration
@@ -100,6 +101,7 @@ type resultEntry struct {
 	ProxyCode  string
 	ProxyTime  string
 	Scanned    int64
+	DPIStatus  string
 }
 
 func main() {
@@ -146,6 +148,7 @@ func loadConfig() config {
 		Results:         getStr(values, "SITEWATCH_RESULTS", "/etc/sitewatch/results.tsv"),
 		ProxyOut:        getStr(values, "SITEWATCH_PROXY_OUT", "/etc/sitewatch/proxy-domains.txt"),
 		Lock:            getStr(values, "SITEWATCH_LOCK", "/tmp/sitewatch-scan.lock"),
+		ScanStatus:      getStr(values, "SITEWATCH_SCAN_STATUS", "/tmp/sitewatch-scan.status"),
 		Proxy:           getStr(values, "SITEWATCH_PROXY", "socks5h://127.0.0.1:20170"),
 		Batch:           getInt(values, "SITEWATCH_BATCH", 12),
 		Timeout:         time.Duration(getInt(values, "SITEWATCH_TIMEOUT", 7)) * time.Second,
@@ -306,7 +309,14 @@ func cmdScan(cfg config) error {
 		domains = domains[:cfg.Batch]
 	}
 
-	for _, item := range domains {
+	writeScanStatus(cfg, "running", now, len(domains), 0, "")
+	if len(domains) == 0 {
+		writeScanStatus(cfg, "done", now, 0, 0, "")
+		return nil
+	}
+
+	for idx, item := range domains {
+		writeScanStatus(cfg, "running", now, len(domains), idx, item.Domain)
 		result, err := checkURL(cfg, "https://"+item.Domain+"/", false)
 		if err != nil {
 			continue
@@ -321,6 +331,7 @@ func cmdScan(cfg config) error {
 			ProxyCode:  result.Proxy.Code,
 			ProxyTime:  fmt.Sprintf("%.6f", result.Proxy.Time),
 			Scanned:    now,
+			DPIStatus:  dpiSummary(result.DPI),
 		}
 		maybeAddProxyDomain(cfg, result.Domain, result.Status)
 
@@ -339,14 +350,50 @@ func cmdScan(cfg config) error {
 						ProxyCode:  baseResult.Proxy.Code,
 						ProxyTime:  fmt.Sprintf("%.6f", baseResult.Proxy.Time),
 						Scanned:    now,
+						DPIStatus:  dpiSummary(baseResult.DPI),
 					}
 					maybeAddProxyDomain(cfg, baseResult.Domain, baseResult.Status)
 				}
 			}
 		}
+		writeScanStatus(cfg, "running", now, len(domains), idx+1, item.Domain)
 	}
 
-	return writeResults(cfg.Results, results)
+	if err := writeResults(cfg.Results, results); err != nil {
+		writeScanStatus(cfg, "error", now, len(domains), len(domains), "")
+		return err
+	}
+	writeScanStatus(cfg, "done", now, len(domains), len(domains), "")
+	return nil
+}
+
+func writeScanStatus(cfg config, state string, started int64, total int, done int, current string) {
+	if cfg.ScanStatus == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(cfg.ScanStatus), 0755)
+	tmp := cfg.ScanStatus + ".tmp"
+	line := fmt.Sprintf("%s\t%d\t%d\t%d\t%s\t%d\n", state, started, total, done, current, time.Now().Unix())
+	if err := os.WriteFile(tmp, []byte(line), 0644); err == nil {
+		_ = os.Rename(tmp, cfg.ScanStatus)
+	}
+}
+
+func dpiSummary(dpi dpiProbe) string {
+	switch {
+	case dpi.DNS.Status == "spoofed" || dpi.DNS.Status == "intercepted" || dpi.DNS.Status == "blocked":
+		return dpi.DNS.Status
+	case dpi.TLS13.Status != "" && dpi.TLS13.Status != "ok":
+		return "tls13_" + dpi.TLS13.Status
+	case dpi.TLS12.Status != "" && dpi.TLS12.Status != "ok":
+		return "tls12_" + dpi.TLS12.Status
+	case dpi.HTTP.Status != "" && dpi.HTTP.Status != "ok":
+		return "http_" + dpi.HTTP.Status
+	case dpi.DNS.Status != "":
+		return dpi.DNS.Status
+	default:
+		return "-"
+	}
 }
 
 func ensureDataFiles(cfg config) error {
@@ -949,6 +996,11 @@ func readResults(path string) (map[string]resultEntry, error) {
 			ProxyTime:  parts[7],
 			Scanned:    parseInt64(parts[8]),
 		}
+		if len(parts) >= 10 {
+			item := out[parts[0]]
+			item.DPIStatus = parts[9]
+			out[parts[0]] = item
+		}
 	}
 	return out, scanner.Err()
 }
@@ -975,8 +1027,8 @@ func writeResults(path string, results map[string]resultEntry) error {
 	})
 	writer := bufio.NewWriter(file)
 	for _, item := range items {
-		fmt.Fprintf(writer, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%d\n",
-			item.Domain, item.Source, item.Count, item.Status, item.DirectCode, item.DirectTime, item.ProxyCode, item.ProxyTime, item.Scanned)
+		fmt.Fprintf(writer, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+			item.Domain, item.Source, item.Count, item.Status, item.DirectCode, item.DirectTime, item.ProxyCode, item.ProxyTime, item.Scanned, item.DPIStatus)
 	}
 	if err := writer.Flush(); err != nil {
 		file.Close()
