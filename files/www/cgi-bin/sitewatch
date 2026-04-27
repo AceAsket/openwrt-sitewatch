@@ -323,6 +323,7 @@ case "$action" in
 		: > "$SITEWATCH_SEEN"
 		: > "$SITEWATCH_QUEUE"
 		: > "$SITEWATCH_RESULTS"
+		: > "$SITEWATCH_PROXY_OUT"
 		rm -f "$SITEWATCH_SCAN_STATUS"
 		clear_dns_logs
 		;;
@@ -700,7 +701,7 @@ button.button{font:inherit;cursor:pointer}
 <input type="hidden" name="source" value="$source_filter_e">
 <label class="scan-workers">Потоков <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
 <button class="button primary" type="submit">Распознать ожидающие</button>
-<a class="button danger" href="?action=clear_observations" data-confirm="Очистить DNS-запросы и результаты проверок? VPN-список останется.">Очистить наблюдения</a>
+<a class="button danger" href="?action=clear_observations" data-confirm="Очистить DNS-запросы, результаты проверок и VPN-список?">Очистить наблюдения</a>
 </form>
 
 <section class="scan-progress" id="scanProgress" data-state="$scan_state" data-total="$scan_total" data-done="$scan_done">
