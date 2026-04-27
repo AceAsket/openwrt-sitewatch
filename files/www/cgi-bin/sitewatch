@@ -102,6 +102,16 @@ status_label() {
 	esac
 }
 
+capture_label() {
+	case "$1" in
+		running) echo "идет" ;;
+		done) echo "завершено" ;;
+		stopped) echo "остановлено" ;;
+		idle|"") echo "ожидает" ;;
+		*) echo "$1" ;;
+	esac
+}
+
 action="$(param action)"
 source_filter="$(safe_token "$(param source)")"
 duration="$(safe_token "$(param duration)")"
@@ -147,6 +157,18 @@ case "$action" in
 		else
 			SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1
 		fi
+		;;
+	scan_pending)
+		if [ -n "$source_filter" ]; then
+			SITEWATCH_SOURCE_FILTER="$source_filter" "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1
+		else
+			"$SITEWATCH_SCAN_BIN" >/dev/null 2>&1
+		fi
+		;;
+	clear_observations)
+		: > "$SITEWATCH_SEEN"
+		: > "$SITEWATCH_QUEUE"
+		: > "$SITEWATCH_RESULTS"
 		;;
 	manual_check)
 		if [ -n "$manual_url" ]; then
@@ -215,12 +237,14 @@ capture_status="$(cat "$SITEWATCH_CAPTURE_STATUS" 2>/dev/null || true)"
 capture_text="DNS-логирование выключено"
 [ "$dns_logging" = "1" ] && capture_text="DNS-логирование включено"
 capture_state=""
+capture_mode_text="ожидает"
 capture_time=""
 capture_duration=""
 capture_last=""
 capture_remaining=""
 if [ -n "$capture_status" ]; then
 	capture_state="$(printf "%s" "$capture_status" | awk -F '\t' '{print $1}')"
+	capture_mode_text="$(capture_label "$capture_state")"
 	capture_time="$(printf "%s" "$capture_status" | awk -F '\t' '{print $2}')"
 	capture_duration="$(printf "%s" "$capture_status" | awk -F '\t' '{print $3}')"
 	capture_last="$(printf "%s" "$capture_status" | awk -F '\t' '{print $4}')"
@@ -353,7 +377,8 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .capture-banner.running{border-color:#d99000}.capture-left{display:flex;align-items:center;gap:10px;min-width:0}.pulse{width:10px;height:10px;border-radius:50%;background:#8a93a3;flex:0 0 auto}.capture-banner.running .pulse{background:#d99000;box-shadow:0 0 0 0 rgba(217,144,0,.55);animation:pulse 1.4s infinite}.timer{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:800}.live-tag{border-radius:999px;border:1px solid var(--line);padding:3px 8px;color:var(--muted);font-weight:700}.capture-meta{display:flex;align-items:center;gap:8px;justify-content:flex-end}
 @keyframes pulse{70%{box-shadow:0 0 0 9px rgba(217,144,0,0)}100%{box-shadow:0 0 0 0 rgba(217,144,0,0)}}
 .stat{background:rgba(255,255,255,.88);border:1px solid var(--line);border-radius:8px;padding:12px 14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.stat .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.stat .v{display:block;font-size:24px;line-height:1.2;font-weight:800;margin-top:4px}.stat.wide .v{font-size:16px;margin-top:7px}
-.health{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 16px}.pill-card{background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 10px;display:inline-flex;align-items:center;gap:10px;color:var(--muted)}.pill-card b{font-size:15px;color:var(--text)}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
+.health{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 10px}.pill-card{background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 10px;display:inline-flex;align-items:center;gap:10px;color:var(--muted)}.pill-card b{font-size:15px;color:var(--text)}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
+.queue-actions{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
 .utility-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px}.utility-grid .source-panel{margin-bottom:0}.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.export-grid{display:grid;grid-template-columns:1fr;gap:8px}
 .source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:12px;background:rgba(255,255,255,.35)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
@@ -400,7 +425,7 @@ button.button{font:inherit;cursor:pointer}
 
 <section class="capture-banner ${capture_state:-idle}" id="captureBanner" data-state="$capture_state" data-start="$capture_time" data-duration="$capture_duration" data-remaining="$capture_remaining">
 <div class="capture-left"><span class="pulse"></span><div><b id="captureTitle">$capture_text</b><div class="muted" id="captureDetail">Новые DNS-запросы подхватываются автоматически во время активного окна.</div></div></div>
-<div class="capture-meta"><span class="timer" id="captureTimer">${capture_remaining:-}</span> <span class="live-tag" id="captureMode">${capture_state:-idle}</span></div>
+<div class="capture-meta"><span class="timer" id="captureTimer">${capture_remaining:-}</span> <span class="live-tag" id="captureMode">$capture_mode_text</span></div>
 </section>
 
 <section class="toolbar">
@@ -443,6 +468,11 @@ button.button{font:inherit;cursor:pointer}
 <div class="pill-card"><span><span class="dot unchecked"></span>Ожидают</span><b>$unchecked_count</b></div>
 </section>
 
+<section class="queue-actions">
+<a class="button primary" href="?action=scan_pending$source_q">Распознать ожидающие</a>
+<a class="button danger" href="?action=clear_observations" data-confirm="Очистить DNS-запросы и результаты проверок? VPN-список останется.">Очистить наблюдения</a>
+</section>
+
 <section class="manual-panel">
 <div class="tool-title">Ручная проверка URL</div>
 <form method="get" action="" id="manualCheckForm">
@@ -459,16 +489,16 @@ if [ -n "$manual_result" ]; then
 cat <<EOF
 <div class="manual-metric"><span>Статус</span><b><span class="status $manual_status_e">$manual_status_text_e</span></b></div>
 <div class="manual-metric"><span>Домен</span><b>$manual_domain_e</b></div>
-<div class="manual-metric"><span>Напрямую</span><b>$manual_direct_code_e / ${manual_direct_time_e}s</b></div>
-<div class="manual-metric"><span>Через v2rayA</span><b>$manual_proxy_code_e / ${manual_proxy_time_e}s</b></div>
+<div class="manual-metric"><span>Напрямую</span><b>$manual_direct_code_e / ${manual_direct_time_e} с</b></div>
+<div class="manual-metric"><span>Через v2rayA</span><b>$manual_proxy_code_e / ${manual_proxy_time_e} с</b></div>
 <div class="manual-metric"><span>URL</span><b>$manual_checked_url_e</b></div>
 <div class="manual-metric"><span>VPN-список</span><b>$manual_added_e</b></div>
 <details class="manual-dpi">
 <summary>DPI-диагностика</summary>
 <div class="manual-dpi-grid">
 <div class="manual-metric"><span>DNS DPI</span><b>$manual_dns_status_e · UDP $manual_dns_udp_ip_e · DoH $manual_dns_doh_ip_e</b></div>
-<div class="manual-metric"><span>TLS 1.3</span><b>$manual_tls13_status_e / ${manual_tls13_time_e}s</b></div>
-<div class="manual-metric"><span>TLS 1.2</span><b>$manual_tls12_status_e / ${manual_tls12_time_e}s</b></div>
+<div class="manual-metric"><span>TLS 1.3</span><b>$manual_tls13_status_e / ${manual_tls13_time_e} с</b></div>
+<div class="manual-metric"><span>TLS 1.2</span><b>$manual_tls12_status_e / ${manual_tls12_time_e} с</b></div>
 <div class="manual-metric"><span>HTTP probe</span><b>$manual_http_status_e / $manual_http_code_e</b></div>
 </div>
 </details>
@@ -547,7 +577,7 @@ awk -F '\t' -v source_filter="$source_filter" '
 	{
 		domain = $1;
 		if (source_filter == "" || $2 == source_filter) {
-			print $4, domain, $2, $3, $5 " / " $6 "s", $7 " / " $8 "s", $9;
+			print $4, domain, $2, $3, $5 " / " $6 " с", $7 " / " $8 " с", $9;
 			done[domain] = 1;
 		}
 	}
@@ -607,6 +637,15 @@ cat <<'EOF'
 </script>
 <script>
 (function(){
+  document.addEventListener('click', function(event){
+    var link = event.target.closest ? event.target.closest('[data-confirm]') : null;
+    if (!link) return;
+    if (!window.confirm(link.getAttribute('data-confirm'))) event.preventDefault();
+  });
+})();
+</script>
+<script>
+(function(){
   var endpoint = window.location.pathname || '/';
   var banner = document.getElementById('captureBanner');
   var timer = document.getElementById('captureTimer');
@@ -617,6 +656,13 @@ cat <<'EOF'
   var proxyTotal = document.getElementById('summaryProxy');
   var source = '$source_filter_e';
   var reloadedAfterDone = false;
+  var modeLabels = {
+    running: 'идет',
+    done: 'завершено',
+    stopped: 'остановлено',
+    idle: 'ожидает',
+    manual: 'без таймера'
+  };
   function parseStatus(text){
     var out = {};
     text.trim().split('\n').forEach(function(line){
@@ -649,18 +695,18 @@ cat <<'EOF'
     var start = parseInt(banner.getAttribute('data-start') || '0', 10);
     if (state === 'running' && duration > 0 && start > 0) {
       var left = Math.max(0, start + duration - Math.floor(Date.now() / 1000));
-      timer.textContent = left + 's';
-      mode.textContent = 'timer';
+      timer.textContent = left + ' с';
+      mode.textContent = 'таймер';
       if (left === 0 && !reloadedAfterDone) {
         reloadedAfterDone = true;
         setTimeout(function(){ location.reload(); }, 2200);
       }
     } else if (state === 'running') {
       timer.textContent = 'live';
-      mode.textContent = 'manual';
+      mode.textContent = 'без таймера';
     } else {
       timer.textContent = '';
-      mode.textContent = state || 'idle';
+      mode.textContent = modeLabels[state] || state || 'ожидает';
     }
   }
   render();
@@ -732,8 +778,8 @@ cat <<'EOF'
     badge.textContent = labels[status] || status;
     result.appendChild(metric('Статус', badge));
     result.appendChild(metric('Домен', data.domain));
-    result.appendChild(metric('Напрямую', text(data.direct_code) + ' / ' + text(data.direct_time) + 's'));
-    result.appendChild(metric('Через v2rayA', text(data.proxy_code) + ' / ' + text(data.proxy_time) + 's'));
+    result.appendChild(metric('Напрямую', text(data.direct_code) + ' / ' + text(data.direct_time) + ' с'));
+    result.appendChild(metric('Через v2rayA', text(data.proxy_code) + ' / ' + text(data.proxy_time) + ' с'));
     result.appendChild(metric('URL', data.url));
     result.appendChild(metric('VPN-список', data.added || data.error || 'no'));
     var details = document.createElement('details');
@@ -743,8 +789,8 @@ cat <<'EOF'
     var grid = document.createElement('div');
     grid.className = 'manual-dpi-grid';
     grid.appendChild(metric('DNS DPI', text(data.dns_status) + ' · UDP ' + text(data.dns_udp_ip) + ' · DoH ' + text(data.dns_doh_ip)));
-    grid.appendChild(metric('TLS 1.3', text(data.tls13_status) + ' / ' + text(data.tls13_time) + 's'));
-    grid.appendChild(metric('TLS 1.2', text(data.tls12_status) + ' / ' + text(data.tls12_time) + 's'));
+    grid.appendChild(metric('TLS 1.3', text(data.tls13_status) + ' / ' + text(data.tls13_time) + ' с'));
+    grid.appendChild(metric('TLS 1.2', text(data.tls12_status) + ' / ' + text(data.tls12_time) + ' с'));
     grid.appendChild(metric('HTTP probe', text(data.http_status) + ' / ' + text(data.http_code)));
     details.appendChild(summary);
     details.appendChild(grid);
