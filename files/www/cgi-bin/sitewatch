@@ -199,17 +199,18 @@ main{max-width:1240px;margin:0 auto;padding:22px}
 .top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
 .brand{display:flex;align-items:center;gap:12px}.mark{width:42px;height:42px;border-radius:8px;background:#17202c;color:white;display:grid;place-items:center;font-weight:800;box-shadow:0 10px 24px rgba(23,32,44,.16)}
 h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-top:4px}
-.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.button{border:1px solid var(--line);background:var(--panel);border-radius:7px;color:var(--text);display:inline-flex;align-items:center;min-height:36px;padding:8px 11px;text-decoration:none;font-weight:650;box-shadow:0 1px 1px rgba(15,23,42,.04)}
-.button.primary{background:var(--blue);border-color:var(--blue);color:white}.button.warn{background:#fff7df;border-color:#f0d27a;color:#6f4a00}.button:hover{border-color:#b7c2d1}
-.toolbar{display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:14px}.tool{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:0 12px 30px rgba(20,35,55,.06)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.button{border:1px solid var(--line);background:var(--panel);border-radius:7px;color:var(--text);display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 11px;text-decoration:none;font-weight:650;box-shadow:0 1px 1px rgba(15,23,42,.04)}
+.button.primary{background:var(--blue);border-color:var(--blue);color:white}.button.warn{background:#fff7df;border-color:#f0d27a;color:#6f4a00}.button.danger{background:#fff0f1;border-color:#efb8be;color:#9f1d2a}.button:hover{border-color:#b7c2d1}
+.toolbar{display:grid;grid-template-columns:1fr 320px;gap:10px;margin-bottom:14px}.tool{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:0 12px 30px rgba(20,35,55,.06)}
 .tool form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tool input,.tool select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
-.capture{color:var(--muted);font-size:13px;margin-top:8px}.summary{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:10px;margin-bottom:14px}
-.capture-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:10px 12px;margin-bottom:14px;box-shadow:0 12px 30px rgba(20,35,55,.06)}
-.capture-banner.running{border-color:#d99000}.capture-left{display:flex;align-items:center;gap:10px}.pulse{width:10px;height:10px;border-radius:50%;background:#8a93a3}.capture-banner.running .pulse{background:#d99000;box-shadow:0 0 0 0 rgba(217,144,0,.55);animation:pulse 1.4s infinite}.timer{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:800}.live-tag{border-radius:999px;border:1px solid var(--line);padding:3px 8px;color:var(--muted);font-weight:700}
+.tool-title{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:800;margin-bottom:8px}.capture{color:var(--muted);font-size:13px;margin-top:8px}.summary{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:10px;margin-bottom:14px}
+.capture-banner{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:13px 14px;margin-bottom:14px;box-shadow:0 12px 30px rgba(20,35,55,.06)}
+.capture-banner.running{border-color:#d99000}.capture-left{display:flex;align-items:center;gap:10px;min-width:0}.pulse{width:10px;height:10px;border-radius:50%;background:#8a93a3;flex:0 0 auto}.capture-banner.running .pulse{background:#d99000;box-shadow:0 0 0 0 rgba(217,144,0,.55);animation:pulse 1.4s infinite}.timer{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:800}.live-tag{border-radius:999px;border:1px solid var(--line);padding:3px 8px;color:var(--muted);font-weight:700}.capture-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.capture-meta{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-bottom:8px}
 @keyframes pulse{70%{box-shadow:0 0 0 9px rgba(217,144,0,0)}100%{box-shadow:0 0 0 0 rgba(217,144,0,0)}}
 .stat{background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:8px;padding:13px 14px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.stat .v{display:block;font-size:25px;line-height:1.2;font-weight:800;margin-top:4px}.stat.wide .v{font-size:16px;margin-top:7px}
 .health{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:16px}.pill-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.pill-card b{font-size:18px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
+.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.export-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 .status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}
@@ -220,8 +221,9 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .mark{background:#e7edf5;color:#111821;box-shadow:0 10px 24px rgba(0,0,0,.34)}
 :root[data-theme="dark"] .button{background:#151c26;color:var(--text);box-shadow:0 1px 1px rgba(0,0,0,.25)}
 :root[data-theme="dark"] .button.warn{background:#2b2414;border-color:#7a5a1c;color:#ffd37a}
+:root[data-theme="dark"] .button.danger{background:#301b20;border-color:#7b3440;color:#ffb3bb}
 :root[data-theme="dark"] .button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-:root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .pill-card,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
+:root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .pill-card,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
 :root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select{background:#0f1620;color:var(--text)}
 :root[data-theme="dark"] .chip.active{background:#e7edf5;color:#111821;border-color:#e7edf5}
 :root[data-theme="dark"] .chip.active small{color:#475569}
@@ -234,8 +236,8 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
-@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.toolbar{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.health{grid-template-columns:repeat(2,minmax(0,1fr))}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
-@media(max-width:560px){.summary,.health{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
+@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-actions,.capture-meta{justify-content:flex-start}.toolbar{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.health{grid-template-columns:repeat(2,minmax(0,1fr))}.export-grid{grid-template-columns:repeat(2,minmax(0,1fr))}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+@media(max-width:560px){.summary,.health,.export-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
 </style>
 </head>
 <body>
@@ -243,25 +245,25 @@ button.button{font:inherit;cursor:pointer}
 <section class="top">
 <div class="brand"><div class="mark">SW</div><div><h1>SiteWatch</h1><div class="subtitle">Мониторинг блокировок по устройствам без постоянного DNS-логирования</div></div></div>
 <div class="actions">
-<a class="button warn" href="?action=capture&duration=45$source_q">Снять DNS 45 сек</a>
-<a class="button warn" href="?action=capture_live$source_q">Live без таймера</a>
-<a class="button" href="?action=capture_stop$source_q">Стоп live</a>
-<a class="button primary" href="?action=scan$source_q">Сканировать: $source_title_e</a>
-<a class="button" href="?action=export">Скачать список</a>
-<a class="button" href="?action=export_base">Базовые домены</a>
-<a class="button" href="?action=export_v2raya">v2rayA rules</a>
-<a class="button" href="?action=export_v2raya_base">v2rayA base</a>
 <button class="button" id="themeToggle" type="button">Dark</button>
 </div>
 </section>
 
 <section class="capture-banner ${capture_state:-idle}" id="captureBanner" data-state="$capture_state" data-start="$capture_time" data-duration="$capture_duration" data-remaining="$capture_remaining">
 <div class="capture-left"><span class="pulse"></span><div><b id="captureTitle">$capture_text</b><div class="muted" id="captureDetail">Новые DNS-запросы подхватываются автоматически во время активного окна.</div></div></div>
-<div><span class="timer" id="captureTimer">${capture_remaining:-}</span> <span class="live-tag" id="captureMode">${capture_state:-idle}</span></div>
+<div>
+<div class="capture-meta"><span class="timer" id="captureTimer">${capture_remaining:-}</span> <span class="live-tag" id="captureMode">${capture_state:-idle}</span></div>
+<div class="capture-actions">
+<a class="button warn" href="?action=capture&duration=45$source_q">45 сек</a>
+<a class="button warn" href="?action=capture_live$source_q">Live</a>
+<a class="button danger" href="?action=capture_stop$source_q">Стоп</a>
+</div>
+</div>
 </section>
 
 <section class="toolbar">
 <div class="tool">
+<div class="tool-title">Проверка устройства</div>
 <form method="get" action="/cgi-bin/sitewatch">
 <input type="hidden" name="action" value="scan">
 <label>Источник</label>
@@ -272,10 +274,11 @@ button.button{font:inherit;cursor:pointer}
 <div class="capture">$capture_text</div>
 </div>
 <div class="tool">
+<div class="tool-title">Окно наблюдения</div>
 <form method="get" action="/cgi-bin/sitewatch">
 <input type="hidden" name="action" value="capture">
 <select name="duration"><option value="30">30 сек</option><option value="45" selected>45 сек</option><option value="90">90 сек</option><option value="180">180 сек</option><option value="300">300 сек</option></select>
-<button class="button warn" type="submit">Окно наблюдения</button>
+<button class="button warn" type="submit">Запустить</button>
 </form>
 </div>
 </section>
@@ -294,6 +297,16 @@ button.button{font:inherit;cursor:pointer}
 <div class="pill-card"><span><span class="dot ok"></span>Норма</span><b>$ok_count</b></div>
 <div class="pill-card"><span><span class="dot proxy_failed"></span>Proxy fail</span><b>$failed_count</b></div>
 <div class="pill-card"><span><span class="dot unchecked"></span>Ожидают</span><b>$unchecked_count</b></div>
+</section>
+
+<section class="export-panel">
+<div class="tool-title">Выгрузка правил</div>
+<div class="export-grid">
+<a class="button" href="?action=export">domain: список</a>
+<a class="button" href="?action=export_base">Базовые домены</a>
+<a class="button" href="?action=export_v2raya">v2rayA rules</a>
+<a class="button" href="?action=export_v2raya_base">v2rayA base</a>
+</div>
 </section>
 
 <nav class="sources">
