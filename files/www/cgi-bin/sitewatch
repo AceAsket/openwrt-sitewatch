@@ -10,6 +10,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_COLLECT_BIN:=/usr/bin/sitewatch-collect}"
 : "${SITEWATCH_CAPTURE_BIN:=/usr/bin/sitewatch-capture}"
 : "${SITEWATCH_CAPTURE_STATUS:=/tmp/sitewatch-capture.status}"
+: "${SITEWATCH_CAPTURE_LOCK:=/tmp/sitewatch-capture.lock}"
 
 html_escape() {
 	sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
@@ -77,10 +78,25 @@ source_q=""
 
 case "$action" in
 	capture)
-		"$SITEWATCH_CAPTURE_BIN" "$duration" >/dev/null 2>&1
+		"$SITEWATCH_CAPTURE_BIN" "$duration" >/dev/null 2>&1 &
+		;;
+	capture_live)
+		"$SITEWATCH_CAPTURE_BIN" 0 >/dev/null 2>&1 &
+		;;
+	capture_stop)
+		"$SITEWATCH_CAPTURE_BIN" stop >/dev/null 2>&1
 		;;
 	collect)
 		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
+		;;
+	status)
+		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
+		printf "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+		printf "capture=%s\n" "$(cat "$SITEWATCH_CAPTURE_STATUS" 2>/dev/null || true)"
+		printf "dns_logging=%s\n" "$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
+		printf "seen=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $1 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_SEEN" 2>/dev/null)"
+		printf "results=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $2 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
+		exit 0
 		;;
 	scan)
 		if [ -n "$source_filter" ]; then
@@ -133,13 +149,26 @@ dns_logging="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
 capture_status="$(cat "$SITEWATCH_CAPTURE_STATUS" 2>/dev/null || true)"
 capture_text="DNS-логирование выключено"
 [ "$dns_logging" = "1" ] && capture_text="DNS-логирование включено"
+capture_state=""
+capture_time=""
+capture_duration=""
+capture_last=""
+capture_remaining=""
 if [ -n "$capture_status" ]; then
 	capture_state="$(printf "%s" "$capture_status" | awk -F '\t' '{print $1}')"
 	capture_time="$(printf "%s" "$capture_status" | awk -F '\t' '{print $2}')"
 	capture_duration="$(printf "%s" "$capture_status" | awk -F '\t' '{print $3}')"
+	capture_last="$(printf "%s" "$capture_status" | awk -F '\t' '{print $4}')"
 	capture_when="$(date -d "@$capture_time" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$capture_time")"
 	[ "$capture_state" = "done" ] && capture_text="Последнее окно: $capture_duration сек, $capture_when"
 	[ "$capture_state" = "running" ] && capture_text="Идет окно наблюдения: $capture_duration сек"
+	[ "$capture_state" = "running" ] && [ "$capture_duration" = "0" ] && capture_text="Идет live-наблюдение без таймера"
+	[ "$capture_state" = "stopped" ] && capture_text="Live-наблюдение остановлено: $capture_when"
+	if [ "$capture_state" = "running" ] && [ "$capture_duration" != "0" ]; then
+		now_for_remaining="$(date +%s)"
+		capture_remaining=$((capture_time + capture_duration - now_for_remaining))
+		[ "$capture_remaining" -lt 0 ] && capture_remaining=0
+	fi
 fi
 
 source_title="Все устройства"
@@ -154,7 +183,6 @@ cat <<EOF
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="120">
 <title>SiteWatch</title>
 <script>
 (function(){
@@ -176,6 +204,9 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .toolbar{display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:14px}.tool{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:0 12px 30px rgba(20,35,55,.06)}
 .tool form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tool input,.tool select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
 .capture{color:var(--muted);font-size:13px;margin-top:8px}.summary{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:10px;margin-bottom:14px}
+.capture-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:10px 12px;margin-bottom:14px;box-shadow:0 12px 30px rgba(20,35,55,.06)}
+.capture-banner.running{border-color:#d99000}.capture-left{display:flex;align-items:center;gap:10px}.pulse{width:10px;height:10px;border-radius:50%;background:#8a93a3}.capture-banner.running .pulse{background:#d99000;box-shadow:0 0 0 0 rgba(217,144,0,.55);animation:pulse 1.4s infinite}.timer{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:800}.live-tag{border-radius:999px;border:1px solid var(--line);padding:3px 8px;color:var(--muted);font-weight:700}
+@keyframes pulse{70%{box-shadow:0 0 0 9px rgba(217,144,0,0)}100%{box-shadow:0 0 0 0 rgba(217,144,0,0)}}
 .stat{background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:8px;padding:13px 14px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.stat .v{display:block;font-size:25px;line-height:1.2;font-weight:800;margin-top:4px}.stat.wide .v{font-size:16px;margin-top:7px}
 .health{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:16px}.pill-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.pill-card b{font-size:18px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
@@ -202,6 +233,7 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.ok{background:#173322;color:#6ee092}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
+:root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
 @media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.toolbar{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.health{grid-template-columns:repeat(2,minmax(0,1fr))}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
 @media(max-width:560px){.summary,.health{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
 </style>
@@ -212,6 +244,8 @@ button.button{font:inherit;cursor:pointer}
 <div class="brand"><div class="mark">SW</div><div><h1>SiteWatch</h1><div class="subtitle">Мониторинг блокировок по устройствам без постоянного DNS-логирования</div></div></div>
 <div class="actions">
 <a class="button warn" href="?action=capture&duration=45$source_q">Снять DNS 45 сек</a>
+<a class="button warn" href="?action=capture_live$source_q">Live без таймера</a>
+<a class="button" href="?action=capture_stop$source_q">Стоп live</a>
 <a class="button primary" href="?action=scan$source_q">Сканировать: $source_title_e</a>
 <a class="button" href="?action=export">Скачать список</a>
 <a class="button" href="?action=export_base">Базовые домены</a>
@@ -219,6 +253,11 @@ button.button{font:inherit;cursor:pointer}
 <a class="button" href="?action=export_v2raya_base">v2rayA base</a>
 <button class="button" id="themeToggle" type="button">Dark</button>
 </div>
+</section>
+
+<section class="capture-banner ${capture_state:-idle}" id="captureBanner" data-state="$capture_state" data-start="$capture_time" data-duration="$capture_duration" data-remaining="$capture_remaining">
+<div class="capture-left"><span class="pulse"></span><div><b id="captureTitle">$capture_text</b><div class="muted" id="captureDetail">Новые DNS-запросы подхватываются автоматически во время активного окна.</div></div></div>
+<div><span class="timer" id="captureTimer">${capture_remaining:-}</span> <span class="live-tag" id="captureMode">${capture_state:-idle}</span></div>
 </section>
 
 <section class="toolbar">
@@ -235,7 +274,7 @@ button.button{font:inherit;cursor:pointer}
 <div class="tool">
 <form method="get" action="/cgi-bin/sitewatch">
 <input type="hidden" name="action" value="capture">
-<select name="duration"><option value="30">30 сек</option><option value="45" selected>45 сек</option><option value="90">90 сек</option><option value="180">180 сек</option></select>
+<select name="duration"><option value="30">30 сек</option><option value="45" selected>45 сек</option><option value="90">90 сек</option><option value="180">180 сек</option><option value="300">300 сек</option></select>
 <button class="button warn" type="submit">Окно наблюдения</button>
 </form>
 </div>
@@ -350,6 +389,40 @@ cat <<'EOF'
     button.addEventListener('click', function(){
       apply(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
     });
+  }
+})();
+</script>
+<script>
+(function(){
+  var banner = document.getElementById('captureBanner');
+  var timer = document.getElementById('captureTimer');
+  var mode = document.getElementById('captureMode');
+  var source = '$source_filter_e';
+  function render(){
+    if (!banner || !timer || !mode) return;
+    var state = banner.getAttribute('data-state') || 'idle';
+    var duration = parseInt(banner.getAttribute('data-duration') || '0', 10);
+    var start = parseInt(banner.getAttribute('data-start') || '0', 10);
+    if (state === 'running' && duration > 0 && start > 0) {
+      var left = Math.max(0, start + duration - Math.floor(Date.now() / 1000));
+      timer.textContent = left + 's';
+      mode.textContent = 'timer';
+      if (left === 0) setTimeout(function(){ location.reload(); }, 1400);
+    } else if (state === 'running') {
+      timer.textContent = 'live';
+      mode.textContent = 'manual';
+    } else {
+      timer.textContent = '';
+      mode.textContent = state || 'idle';
+    }
+  }
+  render();
+  setInterval(render, 1000);
+  if (banner && banner.getAttribute('data-state') === 'running') {
+    setInterval(function(){
+      var url = '/cgi-bin/sitewatch?action=status' + (source ? '&source=' + encodeURIComponent(source) : '');
+      fetch(url, {cache:'no-store'}).then(function(){ location.reload(); }).catch(function(){});
+    }, 6000);
   }
 })();
 </script>

@@ -9,6 +9,10 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_LOG_LINES:=300}"
 : "${SITEWATCH_LOG_FILES:=/var/log/pihole/pihole.log /tmp/log/dnsmasq.log /var/log/messages}"
 : "${SITEWATCH_USE_LOGREAD:=1}"
+: "${SITEWATCH_PIHOLE_API_ENABLED:=0}"
+: "${SITEWATCH_PIHOLE_URL:=}"
+: "${SITEWATCH_PIHOLE_PASSWORD:=}"
+: "${SITEWATCH_PIHOLE_LOOKBACK:=600}"
 
 mkdir -p "$(dirname "$SITEWATCH_QUEUE")"
 touch "$SITEWATCH_QUEUE" "$SITEWATCH_SEEN"
@@ -44,6 +48,46 @@ if [ "$SITEWATCH_USE_LOGREAD" = "1" ] && command -v logread >/dev/null 2>&1; the
 			if (domain != "" && source != "" && source !~ /^127\./ && source != "::1") print source "\t" domain;
 		}
 	' >> "$tmp"
+fi
+
+if [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && [ -n "$SITEWATCH_PIHOLE_URL" ] && [ -n "$SITEWATCH_PIHOLE_PASSWORD" ]; then
+	cookie="/tmp/sitewatch-pihole-cookie.$$"
+	auth="/tmp/sitewatch-pihole-auth.$$"
+	queries="/tmp/sitewatch-pihole-queries.$$"
+	from_ts="$(($(date +%s) - SITEWATCH_PIHOLE_LOOKBACK))"
+	url="${SITEWATCH_PIHOLE_URL%/}"
+	trap 'rm -f "$tmp" "$tmp.new" "$cookie" "$auth" "$queries"' EXIT
+
+	curl -sS -m 8 -c "$cookie" \
+		-H "Content-Type: application/json" \
+		-d "{\"password\":\"$SITEWATCH_PIHOLE_PASSWORD\"}" \
+		"$url/api/auth" > "$auth" 2>/dev/null || true
+
+	csrf="$(sed -n 's/.*"csrf":"\([^"]*\)".*/\1/p' "$auth" | head -n 1)"
+	if grep -q '"valid":true' "$auth"; then
+		curl -sS -m 15 -b "$cookie" \
+			-H "X-CSRF-TOKEN: $csrf" \
+			"$url/api/queries?disk=true&from=$from_ts" > "$queries" 2>/dev/null || true
+
+		sed 's/},{"id":/\n{"id":/g' "$queries" | awk '
+			function field(line, key, out, re) {
+				re = "\"" key "\":\"[^\"]*\"";
+				if (match(line, re)) {
+					out = substr(line, RSTART + length(key) + 4, RLENGTH - length(key) - 5);
+					return out;
+				}
+				return "";
+			}
+			/"domain":/ && /"client":/ {
+				domain = field($0, "domain");
+				client = $0;
+				sub(/^.*"client":\{/, "", client);
+				sub(/\}.*$/, "", client);
+				source = field(client, "ip");
+				if (domain != "" && source != "" && source !~ /^127\./ && source != "::1") print source "\t" domain;
+			}
+		' >> "$tmp"
+	fi
 fi
 
 now="$(date +%s)"

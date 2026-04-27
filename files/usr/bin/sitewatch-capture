@@ -7,13 +7,21 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_COLLECT_BIN:=/usr/bin/sitewatch-collect}"
 : "${SITEWATCH_CAPTURE_STATUS:=/tmp/sitewatch-capture.status}"
 : "${SITEWATCH_CAPTURE_LOCK:=/tmp/sitewatch-capture.lock}"
+: "${SITEWATCH_CAPTURE_STOP:=/tmp/sitewatch-capture.stop}"
+: "${SITEWATCH_CAPTURE_COLLECT_INTERVAL:=5}"
 
 duration="${1:-45}"
 case "$duration" in
+	stop)
+		touch "$SITEWATCH_CAPTURE_STOP"
+		exit 0
+		;;
 	''|*[!0-9]*) duration=45 ;;
 esac
-[ "$duration" -lt 5 ] && duration=5
-[ "$duration" -gt 180 ] && duration=180
+if [ "$duration" != "0" ]; then
+	[ "$duration" -lt 5 ] && duration=5
+	[ "$duration" -gt 600 ] && duration=600
+fi
 
 if ! mkdir "$SITEWATCH_CAPTURE_LOCK" 2>/dev/null; then
 	echo "capture already running"
@@ -31,19 +39,35 @@ restore_dns_logging() {
 	uci commit dhcp
 	/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
 	rmdir "$SITEWATCH_CAPTURE_LOCK" 2>/dev/null || true
+	rm -f "$SITEWATCH_CAPTURE_STOP"
 }
 
 trap 'restore_dns_logging' EXIT INT TERM
 
 now="$(date +%s)"
-printf "running\t%s\t%s\n" "$now" "$duration" > "$SITEWATCH_CAPTURE_STATUS"
+printf "running\t%s\t%s\t%s\n" "$now" "$duration" "$now" > "$SITEWATCH_CAPTURE_STATUS"
 
 uci set dhcp.@dnsmasq[0].logqueries="1"
 uci commit dhcp
 /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
 
-sleep "$duration"
-"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1 || true
+elapsed=0
+while :; do
+	sleep "$SITEWATCH_CAPTURE_COLLECT_INTERVAL"
+	"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1 || true
+	last_collect="$(date +%s)"
+	printf "running\t%s\t%s\t%s\n" "$now" "$duration" "$last_collect" > "$SITEWATCH_CAPTURE_STATUS"
+
+	[ -f "$SITEWATCH_CAPTURE_STOP" ] && break
+	if [ "$duration" != "0" ]; then
+		elapsed=$((last_collect - now))
+		[ "$elapsed" -ge "$duration" ] && break
+	fi
+done
 
 done_at="$(date +%s)"
-printf "done\t%s\t%s\n" "$done_at" "$duration" > "$SITEWATCH_CAPTURE_STATUS"
+if [ -f "$SITEWATCH_CAPTURE_STOP" ]; then
+	printf "stopped\t%s\t%s\t%s\n" "$done_at" "$duration" "$done_at" > "$SITEWATCH_CAPTURE_STATUS"
+else
+	printf "done\t%s\t%s\t%s\n" "$done_at" "$duration" "$done_at" > "$SITEWATCH_CAPTURE_STATUS"
+fi

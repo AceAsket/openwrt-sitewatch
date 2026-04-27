@@ -60,6 +60,10 @@ SITEWATCH_BATCH="12"
 SITEWATCH_TIMEOUT="7"
 SITEWATCH_SLOW_SECONDS="5"
 SITEWATCH_SLOW_RATIO="3"
+SITEWATCH_PIHOLE_API_ENABLED="0"
+SITEWATCH_PIHOLE_URL=""
+SITEWATCH_PIHOLE_PASSWORD=""
+SITEWATCH_PIHOLE_LOOKBACK="600"
 SITEWATCH_EXCLUDE_DOMAINS="connectivitycheck.gstatic.com connectivitycheck.android.com"
 SITEWATCH_CHECK_BASE_DOMAIN="1"
 ```
@@ -67,6 +71,17 @@ SITEWATCH_CHECK_BASE_DOMAIN="1"
 Если v2rayA слушает другой порт, поменяй `SITEWATCH_PROXY`.
 `SITEWATCH_EXCLUDE_DOMAINS` не запрещает проверку домена в UI, но не дает служебным доменам автоматически попадать в VPN-выгрузку.
 `SITEWATCH_CHECK_BASE_DOMAIN=1` включает дополнительную проверку базового домена: если `static2.mangapoisk.io` выглядит заблокированным, сканер отдельно проверит `mangapoisk.io`.
+
+Для Pi-hole на отдельном хосте можно включить API-сбор:
+
+```sh
+SITEWATCH_PIHOLE_API_ENABLED="1"
+SITEWATCH_PIHOLE_URL="http://192.168.50.50:8155"
+SITEWATCH_PIHOLE_PASSWORD="<PIHOLE_PASSWORD>"
+SITEWATCH_PIHOLE_LOOKBACK="86400"
+```
+
+Пароль лучше хранить только на роутере в `/etc/sitewatch/sitewatch.conf`, не в git.
 
 Примеры:
 
@@ -107,9 +122,21 @@ SITEWATCH_LOG_FILES="/path/to/pihole.log /tmp/log/dnsmasq.log"
 sitewatch-capture 45
 ```
 
-Скрипт временно включает `dhcp.@dnsmasq[0].logqueries`, ждет указанное число секунд, собирает домены и возвращает прежнюю настройку DNS-логирования.
+Скрипт временно включает `dhcp.@dnsmasq[0].logqueries`, собирает домены каждые несколько секунд и возвращает прежнюю настройку DNS-логирования после завершения.
 
-Собрать домены из уже имеющихся логов:
+Запуск без таймера:
+
+```sh
+sitewatch-capture 0
+```
+
+Остановка live-режима:
+
+```sh
+sitewatch-capture stop
+```
+
+Собрать домены из уже имеющихся логов и Pi-hole API:
 
 ```sh
 sitewatch-collect
