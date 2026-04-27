@@ -347,7 +347,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .tool form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tool input,.tool select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
 .tool-title{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:800;margin-bottom:8px}.capture{color:var(--muted);font-size:13px;margin-top:8px}.summary{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:10px;margin-bottom:14px}
 .capture-banner{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:14px 16px;margin-bottom:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}
-.capture-banner.running{border-color:#d99000}.capture-left{display:flex;align-items:center;gap:10px;min-width:0}.pulse{width:10px;height:10px;border-radius:50%;background:#8a93a3;flex:0 0 auto}.capture-banner.running .pulse{background:#d99000;box-shadow:0 0 0 0 rgba(217,144,0,.55);animation:pulse 1.4s infinite}.timer{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:800}.live-tag{border-radius:999px;border:1px solid var(--line);padding:3px 8px;color:var(--muted);font-weight:700}.capture-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.capture-meta{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-bottom:8px}
+.capture-banner.running{border-color:#d99000}.capture-left{display:flex;align-items:center;gap:10px;min-width:0}.pulse{width:10px;height:10px;border-radius:50%;background:#8a93a3;flex:0 0 auto}.capture-banner.running .pulse{background:#d99000;box-shadow:0 0 0 0 rgba(217,144,0,.55);animation:pulse 1.4s infinite}.timer{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:800}.live-tag{border-radius:999px;border:1px solid var(--line);padding:3px 8px;color:var(--muted);font-weight:700}.capture-meta{display:flex;align-items:center;gap:8px;justify-content:flex-end}
 @keyframes pulse{70%{box-shadow:0 0 0 9px rgba(217,144,0,0)}100%{box-shadow:0 0 0 0 rgba(217,144,0,0)}}
 .stat{background:rgba(255,255,255,.88);border:1px solid var(--line);border-radius:8px;padding:12px 14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.stat .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.stat .v{display:block;font-size:24px;line-height:1.2;font-weight:800;margin-top:4px}.stat.wide .v{font-size:16px;margin-top:7px}
 .health{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 16px}.pill-card{background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 10px;display:inline-flex;align-items:center;gap:10px;color:var(--muted)}.pill-card b{font-size:15px;color:var(--text)}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
@@ -382,7 +382,7 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
-@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-actions,.capture-meta{justify-content:flex-start}.toolbar,.utility-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-panel form{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-meta{justify-content:flex-start}.toolbar,.utility-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-panel form{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
 @media(max-width:560px){.summary,.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
 </style>
 </head>
@@ -397,14 +397,7 @@ button.button{font:inherit;cursor:pointer}
 
 <section class="capture-banner ${capture_state:-idle}" id="captureBanner" data-state="$capture_state" data-start="$capture_time" data-duration="$capture_duration" data-remaining="$capture_remaining">
 <div class="capture-left"><span class="pulse"></span><div><b id="captureTitle">$capture_text</b><div class="muted" id="captureDetail">Новые DNS-запросы подхватываются автоматически во время активного окна.</div></div></div>
-<div>
 <div class="capture-meta"><span class="timer" id="captureTimer">${capture_remaining:-}</span> <span class="live-tag" id="captureMode">${capture_state:-idle}</span></div>
-<div class="capture-actions">
-<a class="button warn" href="?action=capture&duration=45$source_q">45 сек</a>
-<a class="button warn" href="?action=capture_live$source_q">Live</a>
-<a class="button danger" href="?action=capture_stop$source_q">Стоп</a>
-</div>
-</div>
 </section>
 
 <section class="toolbar">
@@ -425,6 +418,8 @@ button.button{font:inherit;cursor:pointer}
 <input type="hidden" name="action" value="capture">
 <select name="duration"><option value="30">30 сек</option><option value="45" selected>45 сек</option><option value="90">90 сек</option><option value="180">180 сек</option><option value="300">300 сек</option></select>
 <button class="button warn" type="submit">Запустить</button>
+<a class="button warn" href="?action=capture_live$source_q">Live</a>
+<a class="button danger" href="?action=capture_stop$source_q">Стоп</a>
 </form>
 </div>
 </section>
