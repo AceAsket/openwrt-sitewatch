@@ -42,7 +42,7 @@ chmod +x install-openwrt.sh
 http://192.168.1.1:8095/cgi-bin/sitewatch
 ```
 
-Установщик создает отдельный `uhttpd` instance `uhttpd.sitewatch` на порту `8095`, чтобы не смешивать SiteWatch с основной админкой OpenWrt/LuCI. Файл CGI при этом также остается доступен в `/www/cgi-bin/sitewatch` как fallback.
+Установщик создает отдельный `uhttpd` instance `uhttpd.sitewatch` на порту `8095`, чтобы не смешивать SiteWatch с основной админкой OpenWrt/LuCI. CGI ставится только в `/www/sitewatch/cgi-bin/sitewatch`.
 
 Пример секции:
 
