@@ -337,24 +337,24 @@ cat <<EOF
 :root{--bg:#f5f7fa;--panel:#fff;--panel2:#f8fafc;--text:#17202c;--muted:#647184;--line:#dce3eb;--blue:#1f6feb;--red:#c0323a;--amber:#9a6500;--green:#137333;--gray:#5c6573}
 *{box-sizing:border-box}
 body{margin:0;background:linear-gradient(180deg,#eaf0f6 0,#f7f9fb 230px,#f7f9fb 100%);color:var(--text);font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-main{max-width:1240px;margin:0 auto;padding:22px}
+main{max-width:1180px;margin:0 auto;padding:24px}
 .top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
 .brand{display:flex;align-items:center;gap:12px}.mark{width:42px;height:42px;border-radius:8px;background:#17202c;color:white;display:grid;place-items:center;font-weight:800;box-shadow:0 10px 24px rgba(23,32,44,.16)}
 h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-top:4px}
 .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.button{border:1px solid var(--line);background:var(--panel);border-radius:7px;color:var(--text);display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 11px;text-decoration:none;font-weight:650;box-shadow:0 1px 1px rgba(15,23,42,.04)}
 .button.primary{background:var(--blue);border-color:var(--blue);color:white}.button.warn{background:#fff7df;border-color:#f0d27a;color:#6f4a00}.button.danger{background:#fff0f1;border-color:#efb8be;color:#9f1d2a}.button:hover{border-color:#b7c2d1}
-.toolbar{display:grid;grid-template-columns:1fr 320px;gap:10px;margin-bottom:14px}.tool{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:0 12px 30px rgba(20,35,55,.06)}
+.toolbar{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;margin-bottom:14px}.tool{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}
 .tool form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tool input,.tool select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
 .tool-title{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:800;margin-bottom:8px}.capture{color:var(--muted);font-size:13px;margin-top:8px}.summary{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:10px;margin-bottom:14px}
-.capture-banner{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:13px 14px;margin-bottom:14px;box-shadow:0 12px 30px rgba(20,35,55,.06)}
+.capture-banner{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:14px 16px;margin-bottom:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}
 .capture-banner.running{border-color:#d99000}.capture-left{display:flex;align-items:center;gap:10px;min-width:0}.pulse{width:10px;height:10px;border-radius:50%;background:#8a93a3;flex:0 0 auto}.capture-banner.running .pulse{background:#d99000;box-shadow:0 0 0 0 rgba(217,144,0,.55);animation:pulse 1.4s infinite}.timer{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:800}.live-tag{border-radius:999px;border:1px solid var(--line);padding:3px 8px;color:var(--muted);font-weight:700}.capture-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.capture-meta{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-bottom:8px}
 @keyframes pulse{70%{box-shadow:0 0 0 9px rgba(217,144,0,0)}100%{box-shadow:0 0 0 0 rgba(217,144,0,0)}}
-.stat{background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:8px;padding:13px 14px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.stat .v{display:block;font-size:25px;line-height:1.2;font-weight:800;margin-top:4px}.stat.wide .v{font-size:16px;margin-top:7px}
-.health{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:16px}.pill-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.pill-card b{font-size:18px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
+.stat{background:rgba(255,255,255,.88);border:1px solid var(--line);border-radius:8px;padding:12px 14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.stat .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.stat .v{display:block;font-size:24px;line-height:1.2;font-weight:800;margin-top:4px}.stat.wide .v{font-size:16px;margin-top:7px}
+.health{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 16px}.pill-card{background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 10px;display:inline-flex;align-items:center;gap:10px;color:var(--muted)}.pill-card b{font-size:15px;color:var(--text)}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
-.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.export-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.45)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
-.manual-panel form{display:grid;grid-template-columns:minmax(220px,1fr) auto auto;gap:8px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-result:empty{display:none}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:9px;background:rgba(255,255,255,.45)}.manual-metric span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}.manual-loading{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.manual-panel.loading .manual-loading{display:flex}.spinner{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.utility-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px}.utility-grid .source-panel{margin-bottom:0}.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.export-grid{display:grid;grid-template-columns:1fr;gap:8px}
+.source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:12px;background:rgba(255,255,255,.35)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
+.manual-panel form{display:grid;grid-template-columns:minmax(260px,1fr) auto auto;gap:10px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:38px;padding:8px 10px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}.manual-result:empty{display:none}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.35)}.manual-metric span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}.manual-dpi{grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:rgba(255,255,255,.25)}.manual-dpi summary{cursor:pointer;font-weight:800;color:var(--muted)}.manual-dpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-loading{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.manual-panel.loading .manual-loading{display:flex}.spinner{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 .status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}
@@ -367,10 +367,10 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .button.warn{background:#2b2414;border-color:#7a5a1c;color:#ffd37a}
 :root[data-theme="dark"] .button.danger{background:#301b20;border-color:#7b3440;color:#ffb3bb}
 :root[data-theme="dark"] .button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-:root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .pill-card,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel,:root[data-theme="dark"] .source-panel,:root[data-theme="dark"] .manual-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
+:root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel,:root[data-theme="dark"] .source-panel,:root[data-theme="dark"] .manual-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.24)}
 :root[data-theme="dark"] .source-card{background:#111821}
 :root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select,:root[data-theme="dark"] .manual-panel input[type="text"]{background:#0f1620;color:var(--text)}
-:root[data-theme="dark"] .manual-metric{background:#111821}
+:root[data-theme="dark"] .manual-metric,:root[data-theme="dark"] .manual-dpi{background:#111821}
 :root[data-theme="dark"] .chip.active{background:#e7edf5;color:#111821;border-color:#e7edf5}
 :root[data-theme="dark"] .chip.active small{color:#475569}
 :root[data-theme="dark"] th{background:var(--panel2);color:var(--muted)}
@@ -382,8 +382,8 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
-@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-actions,.capture-meta{justify-content:flex-start}.toolbar{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.health{grid-template-columns:repeat(2,minmax(0,1fr))}.export-grid,.source-grid,.manual-result{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-panel form{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
-@media(max-width:560px){.summary,.health,.export-grid,.source-grid,.manual-result{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
+@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-actions,.capture-meta{justify-content:flex-start}.toolbar,.utility-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-panel form{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+@media(max-width:560px){.summary,.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
 </style>
 </head>
 <body>
@@ -463,12 +463,17 @@ cat <<EOF
 <div class="manual-metric"><span>Домен</span><b>$manual_domain_e</b></div>
 <div class="manual-metric"><span>Напрямую</span><b>$manual_direct_code_e / ${manual_direct_time_e}s</b></div>
 <div class="manual-metric"><span>Через v2rayA</span><b>$manual_proxy_code_e / ${manual_proxy_time_e}s</b></div>
+<div class="manual-metric"><span>URL</span><b>$manual_checked_url_e</b></div>
+<div class="manual-metric"><span>VPN-список</span><b>$manual_added_e</b></div>
+<details class="manual-dpi">
+<summary>DPI-диагностика</summary>
+<div class="manual-dpi-grid">
 <div class="manual-metric"><span>DNS DPI</span><b>$manual_dns_status_e · UDP $manual_dns_udp_ip_e · DoH $manual_dns_doh_ip_e</b></div>
 <div class="manual-metric"><span>TLS 1.3</span><b>$manual_tls13_status_e / ${manual_tls13_time_e}s</b></div>
 <div class="manual-metric"><span>TLS 1.2</span><b>$manual_tls12_status_e / ${manual_tls12_time_e}s</b></div>
 <div class="manual-metric"><span>HTTP probe</span><b>$manual_http_status_e / $manual_http_code_e</b></div>
-<div class="manual-metric"><span>URL</span><b>$manual_checked_url_e</b></div>
-<div class="manual-metric"><span>VPN-список</span><b>$manual_added_e</b></div>
+</div>
+</details>
 EOF
 fi
 
@@ -476,7 +481,8 @@ cat <<EOF
 </div>
 </section>
 
-<section class="source-panel">
+<section class="utility-grid">
+<div class="source-panel">
 <div class="tool-title">Источники DNS</div>
 <div class="source-grid">
 <div class="source-card">
@@ -490,15 +496,16 @@ cat <<EOF
 <div style="margin-top:8px"><a class="button" href="?action=pihole_check$source_q">Проверить Pi-hole</a></div>
 </div>
 </div>
-</section>
+</div>
 
-<section class="export-panel">
+<div class="export-panel">
 <div class="tool-title">Выгрузка правил</div>
 <div class="export-grid">
 <a class="button" href="?action=export">domain: список</a>
 <a class="button" href="?action=export_base">Базовые домены</a>
 <a class="button" href="?action=export_v2raya">v2rayA rules</a>
 <a class="button" href="?action=export_v2raya_base">v2rayA base</a>
+</div>
 </div>
 </section>
 
@@ -726,12 +733,21 @@ cat <<'EOF'
     result.appendChild(metric('Домен', data.domain));
     result.appendChild(metric('Напрямую', text(data.direct_code) + ' / ' + text(data.direct_time) + 's'));
     result.appendChild(metric('Через v2rayA', text(data.proxy_code) + ' / ' + text(data.proxy_time) + 's'));
-    result.appendChild(metric('DNS DPI', text(data.dns_status) + ' · UDP ' + text(data.dns_udp_ip) + ' · DoH ' + text(data.dns_doh_ip)));
-    result.appendChild(metric('TLS 1.3', text(data.tls13_status) + ' / ' + text(data.tls13_time) + 's'));
-    result.appendChild(metric('TLS 1.2', text(data.tls12_status) + ' / ' + text(data.tls12_time) + 's'));
-    result.appendChild(metric('HTTP probe', text(data.http_status) + ' / ' + text(data.http_code)));
     result.appendChild(metric('URL', data.url));
     result.appendChild(metric('VPN-список', data.added || data.error || 'no'));
+    var details = document.createElement('details');
+    details.className = 'manual-dpi';
+    var summary = document.createElement('summary');
+    summary.textContent = 'DPI-диагностика';
+    var grid = document.createElement('div');
+    grid.className = 'manual-dpi-grid';
+    grid.appendChild(metric('DNS DPI', text(data.dns_status) + ' · UDP ' + text(data.dns_udp_ip) + ' · DoH ' + text(data.dns_doh_ip)));
+    grid.appendChild(metric('TLS 1.3', text(data.tls13_status) + ' / ' + text(data.tls13_time) + 's'));
+    grid.appendChild(metric('TLS 1.2', text(data.tls12_status) + ' / ' + text(data.tls12_time) + 's'));
+    grid.appendChild(metric('HTTP probe', text(data.http_status) + ' / ' + text(data.http_code)));
+    details.appendChild(summary);
+    details.appendChild(grid);
+    result.appendChild(details);
   }
 
   function cleanManualInput(value){
