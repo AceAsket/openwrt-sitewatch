@@ -661,7 +661,7 @@ button.button{font:inherit;cursor:pointer}
 <form method="get" action="">
 <input type="hidden" name="action" value="scan">
 <label>Источник</label>
-<input name="source" value="$source_filter_e" placeholder="192.168.50.105">
+<input name="source" value="$source_filter_e" placeholder="192.168.1.50">
 <button class="button primary" type="submit">Сканировать устройство</button>
 <a class="button" href="?">Сбросить фильтр</a>
 </form>

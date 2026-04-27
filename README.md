@@ -98,11 +98,11 @@ http://localhost:8095/
 ```yaml
 SITEWATCH_PROXY: "http://host.docker.internal:20171"
 SITEWATCH_PIHOLE_API_ENABLED: "1"
-SITEWATCH_PIHOLE_URL: "http://192.168.50.50:8155"
+SITEWATCH_PIHOLE_URL: "http://192.168.1.2:8155"
 SITEWATCH_PIHOLE_PASSWORD: "<password>"
 ```
 
-Если v2rayA работает на роутере, укажи роутер вместо `host.docker.internal`, например `http://192.168.50.1:20171`. Если контейнер нужен только для ручной проверки и Pi-hole API, DNS-логи можно не монтировать.
+Если v2rayA работает на роутере, укажи роутер вместо `host.docker.internal`, например `http://192.168.1.1:20171`. Если контейнер нужен только для ручной проверки и Pi-hole API, DNS-логи можно не монтировать.
 
 ## Установка
 
@@ -169,7 +169,7 @@ SITEWATCH_DPI_DOH_URL="https://cloudflare-dns.com/dns-query"
 
 ```sh
 SITEWATCH_PIHOLE_API_ENABLED="1"
-SITEWATCH_PIHOLE_URL="http://192.168.50.50:8155"
+SITEWATCH_PIHOLE_URL="http://192.168.1.2:8155"
 SITEWATCH_PIHOLE_PASSWORD="<PIHOLE_PASSWORD>"
 SITEWATCH_PIHOLE_LOOKBACK="86400"
 SITEWATCH_PIHOLE_DISK="0"
@@ -259,7 +259,7 @@ sitewatch-check-url --add https://youmagine.com/
 Проверить только одно устройство:
 
 ```sh
-SITEWATCH_SOURCE_FILTER="192.168.50.105" SITEWATCH_FORCE_RESCAN=1 sitewatch-scan
+SITEWATCH_SOURCE_FILTER="192.168.1.50" SITEWATCH_FORCE_RESCAN=1 sitewatch-scan
 ```
 
 Готовый список для v2rayA:
@@ -280,13 +280,13 @@ domain:myminifactory.com
 Открыть UI с конкретным источником:
 
 ```text
-http://192.168.50.1:8095/?source=192.168.50.105
+http://192.168.1.1:8095/?source=192.168.1.50
 ```
 
 Запустить скан только для него:
 
 ```text
-http://192.168.50.1:8095/?action=scan&source=192.168.50.105
+http://192.168.1.1:8095/?action=scan&source=192.168.1.50
 ```
 
 ## Cron
