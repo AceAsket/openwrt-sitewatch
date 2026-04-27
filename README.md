@@ -34,10 +34,19 @@ curl --version
 make build-openwrt-arm64
 ```
 
+Без локального Go можно собрать тем же способом через Docker на этом ПК:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-openwrt-docker.ps1
+```
+
+В GitLab включен pipeline `.gitlab-ci.yml`: job `build-openwrt-arm64` собирает такой же бинарник и сохраняет его в artifacts на 30 дней.
+
 Получится:
 
 ```text
 dist/sitewatch-linux-arm64
+dist/sitewatch-linux-arm64.sha256
 ```
 
 Установщик положит этот файл в `/usr/bin/sitewatch`, если он есть в `dist/`.
