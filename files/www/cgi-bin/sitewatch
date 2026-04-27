@@ -105,6 +105,13 @@ cat <<EOF
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="120">
 <title>SiteWatch</title>
+<script>
+(function(){
+  var saved = localStorage.getItem('sitewatch-theme');
+  var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
+})();
+</script>
 <style>
 :root{--bg:#f5f7fa;--panel:#fff;--panel2:#f8fafc;--text:#17202c;--muted:#647184;--line:#dce3eb;--blue:#1f6feb;--red:#c0323a;--amber:#9a6500;--green:#137333;--gray:#5c6573}
 *{box-sizing:border-box}
