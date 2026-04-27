@@ -10,6 +10,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_COLLECT_BIN:=/usr/bin/sitewatch-collect}"
 : "${SITEWATCH_CAPTURE_BIN:=/usr/bin/sitewatch-capture}"
 : "${SITEWATCH_CHECK_URL_BIN:=/usr/bin/sitewatch-check-url}"
+: "${SITEWATCH_SCAN_WORKERS:=4}"
 : "${SITEWATCH_CAPTURE_STATUS:=/tmp/sitewatch-capture.status}"
 : "${SITEWATCH_SCAN_STATUS:=/tmp/sitewatch-scan.status}"
 : "${SITEWATCH_CAPTURE_LOCK:=/tmp/sitewatch-capture.lock}"
@@ -29,6 +30,30 @@ param() {
 
 safe_token() {
 	printf "%s" "$1" | sed 's/%2E/./g; s/%2e/./g' | awk '/^[A-Za-z0-9_.:-]+$/ { print; exit }'
+}
+
+normalize_scan_workers() {
+	value="$1"
+	case "$value" in
+		""|*[!0-9]*) return 1 ;;
+	esac
+	[ "$value" -lt 1 ] && value=1
+	[ "$value" -gt 16 ] && value=16
+	printf "%s" "$value"
+}
+
+save_config_value() {
+	key="$1"
+	value="$2"
+	tmp="/tmp/sitewatch-conf.$$"
+	[ -f "$CONF" ] || : > "$CONF" 2>/dev/null || return 0
+	awk -v key="$key" -v value="$value" '
+		BEGIN { done = 0 }
+		$0 ~ "^" key "=" { print key "=\"" value "\""; done = 1; next }
+		{ print }
+		END { if (!done) print key "=\"" value "\"" }
+	' "$CONF" > "$tmp" && cp "$tmp" "$CONF"
+	rm -f "$tmp"
 }
 
 url_decode_light() {
@@ -151,6 +176,10 @@ source_filter="$(safe_token "$(param source)")"
 duration="$(safe_token "$(param duration)")"
 manual_url="$(url_decode_light "$(param url)")"
 manual_add="$(safe_token "$(param add)")"
+scan_workers="$(normalize_scan_workers "$(safe_token "$(param scan_workers)")")"
+[ -n "$scan_workers" ] || scan_workers="$(normalize_scan_workers "$SITEWATCH_SCAN_WORKERS")"
+[ -n "$scan_workers" ] || scan_workers=4
+SITEWATCH_SCAN_WORKERS="$scan_workers"
 [ -n "$duration" ] || duration=45
 source_q=""
 [ -n "$source_filter" ] && source_q="&source=$source_filter"
@@ -188,18 +217,20 @@ case "$action" in
 		exit 0
 		;;
 	scan)
+		save_config_value SITEWATCH_SCAN_WORKERS "$scan_workers"
 		if [ -n "$source_filter" ]; then
-			SITEWATCH_SOURCE_FILTER="$source_filter" SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
+			SITEWATCH_SOURCE_FILTER="$source_filter" SITEWATCH_SCAN_WORKERS="$scan_workers" SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
 		else
-			SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
+			SITEWATCH_SCAN_WORKERS="$scan_workers" SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
 		fi
 		sleep 1
 		;;
 	scan_pending)
+		save_config_value SITEWATCH_SCAN_WORKERS "$scan_workers"
 		if [ -n "$source_filter" ]; then
-			SITEWATCH_SOURCE_FILTER="$source_filter" "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
+			SITEWATCH_SOURCE_FILTER="$source_filter" SITEWATCH_SCAN_WORKERS="$scan_workers" "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
 		else
-			"$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
+			SITEWATCH_SCAN_WORKERS="$scan_workers" "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
 		fi
 		sleep 1
 		;;
@@ -374,6 +405,7 @@ source_title="Все устройства"
 [ -n "$source_filter" ] && source_title="$source_filter"
 source_title_e="$(printf "%s" "$source_title" | html_escape)"
 source_filter_e="$(printf "%s" "$source_filter" | html_escape)"
+scan_workers_e="$(printf "%s" "$scan_workers" | html_escape)"
 manual_url_e="$(printf "%s" "$manual_url" | html_escape)"
 manual_status=""
 manual_status_text=""
@@ -467,7 +499,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 @keyframes pulse{70%{box-shadow:0 0 0 9px rgba(217,144,0,0)}100%{box-shadow:0 0 0 0 rgba(217,144,0,0)}}
 .stat{background:rgba(255,255,255,.88);border:1px solid var(--line);border-radius:8px;padding:12px 14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.stat .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.stat .v{display:block;font-size:24px;line-height:1.2;font-weight:800;margin-top:4px}.stat.wide .v{font-size:16px;margin-top:7px}
 .health{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 10px}.pill-card{background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 10px;display:inline-flex;align-items:center;gap:10px;color:var(--muted)}.pill-card b{font-size:15px;color:var(--text)}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
-.queue-actions{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+.queue-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 16px}.scan-workers{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:7px;background:var(--panel);min-height:36px;padding:6px 9px;color:var(--muted);font-weight:700}.scan-workers input{width:64px;border:1px solid var(--line);border-radius:6px;min-height:28px;padding:4px 7px;background:var(--panel2);color:var(--text);font-weight:800;appearance:textfield}
 .scan-progress{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:10px 12px;margin:-6px 0 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}.scan-progress[data-state=""]{display:none}.scan-text{font-weight:800}.scan-current{color:var(--muted);font-size:13px;word-break:break-word}.bar{height:6px;background:#e7edf5;border-radius:999px;overflow:hidden;grid-column:1/-1}.bar span{display:block;height:100%;width:0;background:var(--blue);transition:width .25s ease}
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
 .utility-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px}.utility-grid .source-panel{margin-bottom:0}.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.export-grid{display:grid;grid-template-columns:1fr;gap:8px}.export-grid select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
@@ -491,6 +523,7 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel,:root[data-theme="dark"] .source-panel,:root[data-theme="dark"] .manual-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.24)}
 :root[data-theme="dark"] .source-card{background:#111821}
 :root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select,:root[data-theme="dark"] .manual-panel input[type="text"],:root[data-theme="dark"] .export-grid select{background:#0f1620;color:var(--text)}
+:root[data-theme="dark"] .scan-workers input{background:#0f1620;color:var(--text)}
 :root[data-theme="dark"] .manual-metric,:root[data-theme="dark"] .manual-dpi{background:#111821}
 :root[data-theme="dark"] .chip.active{background:#e7edf5;color:#111821;border-color:#e7edf5}
 :root[data-theme="dark"] .chip.active small{color:#475569}
@@ -562,10 +595,13 @@ button.button{font:inherit;cursor:pointer}
 <div class="pill-card"><span><span class="dot unchecked"></span>Ожидают</span><b>$unchecked_count</b></div>
 </section>
 
-<section class="queue-actions">
-<a class="button primary" href="?action=scan_pending$source_q">Распознать ожидающие</a>
+<form class="queue-actions" method="get" action="">
+<input type="hidden" name="action" value="scan_pending">
+<input type="hidden" name="source" value="$source_filter_e">
+<label class="scan-workers">Потоков <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
+<button class="button primary" type="submit">Распознать ожидающие</button>
 <a class="button danger" href="?action=clear_observations" data-confirm="Очистить DNS-запросы и результаты проверок? VPN-список останется.">Очистить наблюдения</a>
-</section>
+</form>
 
 <section class="scan-progress" id="scanProgress" data-state="$scan_state" data-total="$scan_total" data-done="$scan_done">
 <div>
@@ -776,6 +812,7 @@ cat <<'EOF'
   var scanCurrent = document.getElementById('scanCurrent');
   var scanMode = document.getElementById('scanMode');
   var scanBar = document.getElementById('scanBar');
+  var scanWorkersInput = document.querySelector('input[name="scan_workers"]');
   var source = '$source_filter_e';
   window.sitewatchPending = '$unchecked_count';
   var reloadedAfterDone = false;
@@ -879,7 +916,8 @@ cat <<'EOF'
         if (data.scan && data.scan.indexOf('done\t') === 0 && pending > 0 && !autoScanPending) {
           autoScanPending = true;
           setTimeout(function(){
-            fetch(endpoint + '?action=scan_pending' + (source ? '&source=' + encodeURIComponent(source) : ''), {cache:'no-store'})
+            var workers = scanWorkersInput ? scanWorkersInput.value : '';
+            fetch(endpoint + '?action=scan_pending' + (source ? '&source=' + encodeURIComponent(source) : '') + (workers ? '&scan_workers=' + encodeURIComponent(workers) : ''), {cache:'no-store'})
               .catch(function(){})
               .finally(function(){ autoScanPending = false; });
           }, 1800);
