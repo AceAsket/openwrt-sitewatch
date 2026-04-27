@@ -13,6 +13,8 @@ CONF="/etc/sitewatch/sitewatch.conf"
 duration="${1:-45}"
 case "$duration" in
 	stop)
+		now="$(date +%s)"
+		printf "stopped\t%s\t0\t%s\n" "$now" "$now" > "$SITEWATCH_CAPTURE_STATUS"
 		touch "$SITEWATCH_CAPTURE_STOP"
 		exit 0
 		;;

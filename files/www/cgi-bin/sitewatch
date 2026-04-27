@@ -115,12 +115,15 @@ manual_result=""
 case "$action" in
 	capture)
 		"$SITEWATCH_CAPTURE_BIN" "$duration" >/dev/null 2>&1 &
+		sleep 1
 		;;
 	capture_live)
 		"$SITEWATCH_CAPTURE_BIN" 0 >/dev/null 2>&1 &
+		sleep 1
 		;;
 	capture_stop)
 		"$SITEWATCH_CAPTURE_BIN" stop >/dev/null 2>&1
+		sleep 1
 		;;
 	collect)
 		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
@@ -662,8 +665,8 @@ cat <<'EOF'
   }
   render();
   setInterval(render, 1000);
-  if (banner && banner.getAttribute('data-state') === 'running') {
-    setInterval(function(){
+  function refreshStatus(){
+    if (!banner) return;
       var url = endpoint + '?action=status' + (source ? '&source=' + encodeURIComponent(source) : '');
       fetch(url, {cache:'no-store'}).then(function(resp){ return resp.text(); }).then(function(text){
         var data = parseStatus(text);
@@ -673,8 +676,9 @@ cat <<'EOF'
         if (data.proxy && proxyTotal) proxyTotal.textContent = data.proxy;
         render();
       }).catch(function(){});
-    }, 6000);
   }
+  setTimeout(refreshStatus, 1200);
+  setInterval(refreshStatus, 6000);
 })();
 </script>
 <script>
