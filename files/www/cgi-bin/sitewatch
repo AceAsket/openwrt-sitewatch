@@ -6,6 +6,9 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_SEEN:=/etc/sitewatch/seen.tsv}"
 : "${SITEWATCH_RESULTS:=/etc/sitewatch/results.tsv}"
 : "${SITEWATCH_PROXY_OUT:=/etc/sitewatch/proxy-domains.txt}"
+: "${SITEWATCH_LOG_FILES:=/var/log/pihole/pihole.log /tmp/log/dnsmasq.log /var/log/messages}"
+: "${SITEWATCH_USE_LOGREAD:=1}"
+: "${SITEWATCH_CLEAR_LOGREAD:=1}"
 : "${SITEWATCH_SCAN_BIN:=/usr/bin/sitewatch-scan}"
 : "${SITEWATCH_COLLECT_BIN:=/usr/bin/sitewatch-collect}"
 : "${SITEWATCH_CAPTURE_BIN:=/usr/bin/sitewatch-capture}"
@@ -54,6 +57,23 @@ save_config_value() {
 		END { if (!done) print key "=\"" value "\"" }
 	' "$CONF" > "$tmp" && cp "$tmp" "$CONF"
 	rm -f "$tmp"
+}
+
+clear_dns_logs() {
+	for log in $SITEWATCH_LOG_FILES; do
+		case "$log" in
+			/tmp/log/*|/var/log/*)
+				[ -f "$log" ] && : > "$log" 2>/dev/null || true
+				;;
+		esac
+	done
+	if [ "$SITEWATCH_USE_LOGREAD" = "1" ] && [ "$SITEWATCH_CLEAR_LOGREAD" = "1" ] && command -v logread >/dev/null 2>&1; then
+		if logread -c >/dev/null 2>&1; then
+			:
+		elif [ -x /etc/init.d/log ]; then
+			/etc/init.d/log restart >/dev/null 2>&1 || true
+		fi
+	fi
 }
 
 url_decode_light() {
@@ -239,6 +259,7 @@ case "$action" in
 		: > "$SITEWATCH_QUEUE"
 		: > "$SITEWATCH_RESULTS"
 		rm -f "$SITEWATCH_SCAN_STATUS"
+		clear_dns_logs
 		;;
 	manual_check)
 		if [ -n "$manual_url" ]; then
