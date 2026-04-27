@@ -13,6 +13,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_PIHOLE_URL:=}"
 : "${SITEWATCH_PIHOLE_PASSWORD:=}"
 : "${SITEWATCH_PIHOLE_LOOKBACK:=600}"
+: "${SITEWATCH_PIHOLE_DISK:=0}"
 : "${SITEWATCH_PIHOLE_STATUS:=/tmp/sitewatch-pihole.status}"
 
 mkdir -p "$(dirname "$SITEWATCH_QUEUE")"
@@ -58,6 +59,10 @@ if [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && [ -n "$SITEWATCH_PIHOLE_URL" ] &
 	parsed="/tmp/sitewatch-pihole-parsed.$$"
 	from_ts="$(($(date +%s) - SITEWATCH_PIHOLE_LOOKBACK))"
 	url="${SITEWATCH_PIHOLE_URL%/}"
+	query_url="$url/api/queries?from=$from_ts"
+	if [ "$SITEWATCH_PIHOLE_DISK" = "1" ]; then
+		query_url="$url/api/queries?disk=true&from=$from_ts"
+	fi
 	trap 'rm -f "$tmp" "$tmp.new" "$cookie" "$auth" "$queries" "$parsed"' EXIT
 	password_json="$(printf "%s" "$SITEWATCH_PIHOLE_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 
@@ -70,7 +75,7 @@ if [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && [ -n "$SITEWATCH_PIHOLE_URL" ] &
 	if grep -Eq '"valid"[[:space:]]*:[[:space:]]*true' "$auth"; then
 		curl -sS -m 15 -b "$cookie" \
 			-H "X-CSRF-TOKEN: $csrf" \
-			"$url/api/queries?disk=true&from=$from_ts" > "$queries" 2>/dev/null || true
+			"$query_url" > "$queries" 2>/dev/null || true
 
 		sed 's/}[[:space:]]*,[[:space:]]*{"id":/}\n{"id":/g' "$queries" | awk '
 			function string_field(line, key, tmp) {

@@ -90,6 +90,7 @@ SITEWATCH_PIHOLE_API_ENABLED="0"
 SITEWATCH_PIHOLE_URL=""
 SITEWATCH_PIHOLE_PASSWORD=""
 SITEWATCH_PIHOLE_LOOKBACK="600"
+SITEWATCH_PIHOLE_DISK="0"
 SITEWATCH_EXCLUDE_DOMAINS="connectivitycheck.gstatic.com connectivitycheck.android.com"
 SITEWATCH_CHECK_BASE_DOMAIN="1"
 ```
@@ -105,9 +106,11 @@ SITEWATCH_PIHOLE_API_ENABLED="1"
 SITEWATCH_PIHOLE_URL="http://192.168.50.50:8155"
 SITEWATCH_PIHOLE_PASSWORD="<PIHOLE_PASSWORD>"
 SITEWATCH_PIHOLE_LOOKBACK="86400"
+SITEWATCH_PIHOLE_DISK="0"
 ```
 
 Пароль лучше хранить только на роутере в `/etc/sitewatch/sitewatch.conf`, не в git.
+По умолчанию SiteWatch читает свежую live-выдачу Pi-hole API. Если нужна именно долговременная база Pi-hole, включи `SITEWATCH_PIHOLE_DISK="1"`, но новые запросы могут появляться там не сразу.
 В статусе Pi-hole показывается количество реально импортированных DNS-пар `source/domain`, а не число сырых записей API. Запросы от `127.0.0.1` и `::1` игнорируются.
 
 Примеры:
