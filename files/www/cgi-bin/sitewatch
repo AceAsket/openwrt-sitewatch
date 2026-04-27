@@ -373,6 +373,16 @@ if [ -n "$capture_status" ]; then
 		[ "$capture_remaining" -lt 0 ] && capture_remaining=0
 	fi
 fi
+capture_controls_class="idle"
+capture_action="capture"
+capture_button_class="warn"
+capture_button_label="Запустить"
+if [ "$capture_state" = "running" ]; then
+	capture_controls_class="running"
+	capture_action="capture_stop"
+	capture_button_class="danger"
+	capture_button_label="Стоп"
+fi
 
 scan_status="$(cat "$SITEWATCH_SCAN_STATUS" 2>/dev/null || true)"
 scan_state=""
@@ -513,7 +523,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.button{border:1px solid var(--line);background:var(--panel);border-radius:7px;color:var(--text);display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 11px;text-decoration:none;font-weight:650;box-shadow:0 1px 1px rgba(15,23,42,.04)}
 .button.primary{background:var(--blue);border-color:var(--blue);color:white}.button.warn{background:#fff7df;border-color:#f0d27a;color:#6f4a00}.button.danger{background:#fff0f1;border-color:#efb8be;color:#9f1d2a}.button:hover{border-color:#b7c2d1}
 .toolbar{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;margin-bottom:14px}.tool{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}
-.tool form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tool input,.tool select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
+.tool form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tool input,.tool select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}.capture-controls.running .capture-start-field,.capture-controls.running .capture-live-link{display:none}
 .tool-title{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:800;margin-bottom:8px}.capture{color:var(--muted);font-size:13px;margin-top:8px}.summary{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:10px;margin-bottom:14px}
 .capture-banner{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:14px 16px;margin-bottom:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}
 .capture-banner.running{border-color:#d99000}.capture-left{display:flex;align-items:center;gap:10px;min-width:0}.pulse{width:10px;height:10px;border-radius:50%;background:#8a93a3;flex:0 0 auto}.capture-banner.running .pulse{background:#d99000;box-shadow:0 0 0 0 rgba(217,144,0,.55);animation:pulse 1.4s infinite}.timer{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:800}.live-tag{border-radius:999px;border:1px solid var(--line);padding:3px 8px;color:var(--muted);font-weight:700}.capture-meta{display:flex;align-items:center;gap:8px;justify-content:flex-end}
@@ -590,12 +600,12 @@ button.button{font:inherit;cursor:pointer}
 </div>
 <div class="tool">
 <div class="tool-title">Окно наблюдения</div>
-<form method="get" action="">
-<input type="hidden" name="action" value="capture">
-<select name="duration"><option value="30">30 сек</option><option value="45" selected>45 сек</option><option value="90">90 сек</option><option value="180">180 сек</option><option value="300">300 сек</option></select>
-<button class="button warn" type="submit">Запустить</button>
-<a class="button warn" href="?action=capture_live$source_q">Live</a>
-<a class="button danger" href="?action=capture_stop$source_q">Стоп</a>
+<form class="capture-controls $capture_controls_class" id="captureControls" method="get" action="">
+<input type="hidden" name="action" id="captureAction" value="$capture_action">
+<input type="hidden" name="source" value="$source_filter_e">
+<select class="capture-start-field" name="duration"><option value="30">30 сек</option><option value="45" selected>45 сек</option><option value="90">90 сек</option><option value="180">180 сек</option><option value="300">300 сек</option></select>
+<button class="button $capture_button_class" id="captureSubmit" type="submit">$capture_button_label</button>
+<a class="button warn capture-live-link" id="captureLive" href="?action=capture_live$source_q">Live</a>
 </form>
 </div>
 </section>
@@ -825,6 +835,9 @@ cat <<'EOF'
   var timer = document.getElementById('captureTimer');
   var mode = document.getElementById('captureMode');
   var title = document.getElementById('captureTitle');
+  var captureControls = document.getElementById('captureControls');
+  var captureAction = document.getElementById('captureAction');
+  var captureSubmit = document.getElementById('captureSubmit');
   var seen = document.getElementById('summarySeen');
   var results = document.getElementById('summaryResults');
   var proxyTotal = document.getElementById('summaryProxy');
@@ -867,6 +880,21 @@ cat <<'EOF'
     banner.setAttribute('data-start', start);
     banner.setAttribute('data-duration', duration);
     banner.className = 'capture-banner ' + state;
+    if (captureControls && captureAction && captureSubmit) {
+      if (state === 'running') {
+        captureControls.classList.add('running');
+        captureAction.value = 'capture_stop';
+        captureSubmit.textContent = 'Стоп';
+        captureSubmit.classList.remove('warn');
+        captureSubmit.classList.add('danger');
+      } else {
+        captureControls.classList.remove('running');
+        captureAction.value = 'capture';
+        captureSubmit.textContent = 'Запустить';
+        captureSubmit.classList.remove('danger');
+        captureSubmit.classList.add('warn');
+      }
+    }
     if (title) {
       if (state === 'running' && duration === '0') title.textContent = 'Идет live-наблюдение без таймера';
       else if (state === 'running') title.textContent = 'Идет окно наблюдения: ' + duration + ' сек';
