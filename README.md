@@ -61,10 +61,12 @@ SITEWATCH_TIMEOUT="7"
 SITEWATCH_SLOW_SECONDS="5"
 SITEWATCH_SLOW_RATIO="3"
 SITEWATCH_EXCLUDE_DOMAINS="connectivitycheck.gstatic.com connectivitycheck.android.com"
+SITEWATCH_CHECK_BASE_DOMAIN="1"
 ```
 
 Если v2rayA слушает другой порт, поменяй `SITEWATCH_PROXY`.
 `SITEWATCH_EXCLUDE_DOMAINS` не запрещает проверку домена в UI, но не дает служебным доменам автоматически попадать в VPN-выгрузку.
+`SITEWATCH_CHECK_BASE_DOMAIN=1` включает дополнительную проверку базового домена: если `static2.mangapoisk.io` выглядит заблокированным, сканер отдельно проверит `mangapoisk.io`.
 
 Примеры:
 
@@ -213,3 +215,21 @@ youmagine.com    manual    1    blocked    ...
 ```text
 domain:youmagine.com
 ```
+
+Дополнительные выгрузки из UI:
+
+```text
+/cgi-bin/sitewatch?action=export
+/cgi-bin/sitewatch?action=export_base
+/cgi-bin/sitewatch?action=export_v2raya
+/cgi-bin/sitewatch?action=export_v2raya_base
+```
+
+`export_v2raya` отдаёт строки для вставки в веб-интерфейс v2rayA:
+
+```text
+domain(domain: yummyani.me) -> proxy
+domain(domain: shikimori.org) -> proxy
+```
+
+`export_base` и `export_v2raya_base` предварительно сворачивают поддомены до базового домена, например `static2.mangapoisk.io` -> `mangapoisk.io`.

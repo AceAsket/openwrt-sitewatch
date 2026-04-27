@@ -24,6 +24,39 @@ safe_token() {
 	printf "%s" "$1" | sed 's/%2E/./g; s/%2e/./g' | awk '/^[A-Za-z0-9_.:-]+$/ { print; exit }'
 }
 
+base_domain() {
+	awk -v d="$1" '
+		BEGIN {
+			n = split(d, p, ".");
+			if (n <= 2) {
+				print d;
+				exit;
+			}
+			suffix = p[n - 1] "." p[n];
+			if (suffix ~ /^(co|com|net|org|ac|gov|edu)\.(uk|jp|kr|nz|za|br)$/ && n >= 3) {
+				print p[n - 2] "." suffix;
+			} else {
+				print suffix;
+			}
+		}
+	'
+}
+
+print_proxy_domains() {
+	mode="$1"
+	[ -f "$SITEWATCH_PROXY_OUT" ] || return 0
+	while read -r item; do
+		domain="${item#domain:}"
+		[ -n "$domain" ] || continue
+		case "$mode" in
+			base) base_domain "$domain" ;;
+			v2raya) printf "domain(domain: %s) -> proxy\n" "$domain" ;;
+			v2raya_base) printf "domain(domain: %s) -> proxy\n" "$(base_domain "$domain")" ;;
+			*) printf "domain:%s\n" "$domain" ;;
+		esac
+	done < "$SITEWATCH_PROXY_OUT" | sort -u
+}
+
 status_label() {
 	case "$1" in
 		blocked) echo "заблокирован" ;;
@@ -59,7 +92,25 @@ case "$action" in
 	export)
 		printf "Content-Type: text/plain; charset=utf-8\r\n"
 		printf "Content-Disposition: attachment; filename=\"proxy-domains.txt\"\r\n\r\n"
-		[ -f "$SITEWATCH_PROXY_OUT" ] && cat "$SITEWATCH_PROXY_OUT"
+		print_proxy_domains normal
+		exit 0
+		;;
+	export_base)
+		printf "Content-Type: text/plain; charset=utf-8\r\n"
+		printf "Content-Disposition: attachment; filename=\"proxy-base-domains.txt\"\r\n\r\n"
+		print_proxy_domains base
+		exit 0
+		;;
+	export_v2raya)
+		printf "Content-Type: text/plain; charset=utf-8\r\n"
+		printf "Content-Disposition: attachment; filename=\"v2raya-rules.txt\"\r\n\r\n"
+		print_proxy_domains v2raya
+		exit 0
+		;;
+	export_v2raya_base)
+		printf "Content-Type: text/plain; charset=utf-8\r\n"
+		printf "Content-Disposition: attachment; filename=\"v2raya-base-rules.txt\"\r\n\r\n"
+		print_proxy_domains v2raya_base
 		exit 0
 		;;
 esac
@@ -163,6 +214,9 @@ button.button{font:inherit;cursor:pointer}
 <a class="button warn" href="?action=capture&duration=45$source_q">Снять DNS 45 сек</a>
 <a class="button primary" href="?action=scan$source_q">Сканировать: $source_title_e</a>
 <a class="button" href="?action=export">Скачать список</a>
+<a class="button" href="?action=export_base">Базовые домены</a>
+<a class="button" href="?action=export_v2raya">v2rayA rules</a>
+<a class="button" href="?action=export_v2raya_base">v2rayA base</a>
 <button class="button" id="themeToggle" type="button">Dark</button>
 </div>
 </section>

@@ -17,6 +17,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_SOURCE_FILTER:=}"
 : "${SITEWATCH_FORCE_RESCAN:=0}"
 : "${SITEWATCH_EXCLUDE_DOMAINS:=connectivitycheck.gstatic.com connectivitycheck.android.com}"
+: "${SITEWATCH_CHECK_BASE_DOMAIN:=1}"
 
 mkdir -p "$(dirname "$SITEWATCH_RESULTS")"
 touch "$SITEWATCH_QUEUE" "$SITEWATCH_RESULTS" "$SITEWATCH_PROXY_OUT"
@@ -118,6 +119,49 @@ domain_is_excluded() {
 	return 1
 }
 
+base_domain() {
+	domain="$1"
+	awk -v d="$domain" '
+		BEGIN {
+			n = split(d, p, ".");
+			if (n <= 2) {
+				print d;
+				exit;
+			}
+			suffix = p[n - 1] "." p[n];
+			if (suffix ~ /^(co|com|net|org|ac|gov|edu)\.(uk|jp|kr|nz|za|br)$/ && n >= 3) {
+				print p[n - 2] "." suffix;
+			} else {
+				print suffix;
+			}
+		}
+	'
+}
+
+write_result() {
+	result_domain="$1"
+	result_source="$2"
+	result_count="$3"
+	result_status="$4"
+	result_direct_code="$5"
+	result_direct_time="$6"
+	result_proxy_code="$7"
+	result_proxy_time="$8"
+
+	awk -v d="$result_domain" 'BEGIN{FS=OFS="\t"} $1 != d {print}' "$new" > "$new.tmp"
+	mv "$new.tmp" "$new"
+	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+		"$result_domain" "$result_source" "$result_count" "$result_status" "$result_direct_code" "$result_direct_time" "$result_proxy_code" "$result_proxy_time" "$now" >> "$new"
+}
+
+maybe_add_proxy_domain() {
+	add_domain="$1"
+	add_status="$2"
+	if { [ "$add_status" = "blocked" ] || [ "$add_status" = "slow" ]; } && ! domain_is_excluded "$add_domain"; then
+		grep -qx "domain:$add_domain" "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo "domain:$add_domain" >> "$SITEWATCH_PROXY_OUT"
+	fi
+}
+
 new="/tmp/sitewatch-results.$$"
 cp "$SITEWATCH_RESULTS" "$new"
 
@@ -132,13 +176,23 @@ while IFS="$(printf '\t')" read -r source domain count; do
 	proxy_time="$(printf "%s" "$proxy" | awk -F '\t' '{print $2}')"
 	status="$(classify "$direct_code" "$direct_time" "$proxy_code" "$proxy_time")"
 
-	awk -v d="$domain" 'BEGIN{FS=OFS="\t"} $1 != d {print}' "$new" > "$new.tmp"
-	mv "$new.tmp" "$new"
-	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-		"$domain" "$source" "$count" "$status" "$direct_code" "$direct_time" "$proxy_code" "$proxy_time" "$now" >> "$new"
+	write_result "$domain" "$source" "$count" "$status" "$direct_code" "$direct_time" "$proxy_code" "$proxy_time"
+	maybe_add_proxy_domain "$domain" "$status"
 
-	if { [ "$status" = "blocked" ] || [ "$status" = "slow" ]; } && ! domain_is_excluded "$domain"; then
-		grep -qx "domain:$domain" "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo "domain:$domain" >> "$SITEWATCH_PROXY_OUT"
+	if [ "$SITEWATCH_CHECK_BASE_DOMAIN" = "1" ] && { [ "$status" = "blocked" ] || [ "$status" = "slow" ]; }; then
+		base="$(base_domain "$domain")"
+		if [ -n "$base" ] && [ "$base" != "$domain" ]; then
+			base_url="https://$base/"
+			base_direct="$(measure "$base_url" "")"
+			base_proxy="$(measure "$base_url" "$SITEWATCH_PROXY")"
+			base_direct_code="$(printf "%s" "$base_direct" | awk -F '\t' '{print $1}')"
+			base_direct_time="$(printf "%s" "$base_direct" | awk -F '\t' '{print $2}')"
+			base_proxy_code="$(printf "%s" "$base_proxy" | awk -F '\t' '{print $1}')"
+			base_proxy_time="$(printf "%s" "$base_proxy" | awk -F '\t' '{print $2}')"
+			base_status="$(classify "$base_direct_code" "$base_direct_time" "$base_proxy_code" "$base_proxy_time")"
+			write_result "$base" "$source" "$count" "$base_status" "$base_direct_code" "$base_direct_time" "$base_proxy_code" "$base_proxy_time"
+			maybe_add_proxy_domain "$base" "$base_status"
+		fi
 	fi
 done < "$todo"
 
