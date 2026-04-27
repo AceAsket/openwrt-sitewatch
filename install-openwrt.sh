@@ -4,6 +4,10 @@ set -eu
 mkdir -p /etc/sitewatch /usr/bin /www/sitewatch/cgi-bin
 
 cp ./sitewatch.conf /etc/sitewatch/sitewatch.conf
+if [ -f ./dist/sitewatch-linux-arm64 ]; then
+	cp ./dist/sitewatch-linux-arm64 /usr/bin/sitewatch
+	chmod +x /usr/bin/sitewatch
+fi
 cp ./files/usr/bin/sitewatch-collect /usr/bin/sitewatch-collect
 cp ./files/usr/bin/sitewatch-capture /usr/bin/sitewatch-capture
 cp ./files/usr/bin/sitewatch-scan /usr/bin/sitewatch-scan
@@ -28,4 +32,5 @@ if command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/uhttpd ]; then
 fi
 
 echo "Installed. Open: http://<router-ip>:8095/cgi-bin/sitewatch"
-echo "Needed packages: curl ca-bundle. For socks proxy support, install full curl/libcurl with proxy support if BusyBox wget/curl is limited."
+echo "Needed packages for shell fallback and Pi-hole API: curl ca-bundle."
+echo "If dist/sitewatch-linux-arm64 was present, scan/check-url use /usr/bin/sitewatch without curl."

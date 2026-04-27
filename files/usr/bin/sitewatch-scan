@@ -4,6 +4,8 @@ set -eu
 CONF="/etc/sitewatch/sitewatch.conf"
 [ -f "$CONF" ] && . "$CONF"
 
+: "${SITEWATCH_GO_BIN:=/usr/bin/sitewatch}"
+: "${SITEWATCH_USE_GO:=1}"
 : "${SITEWATCH_QUEUE:=/etc/sitewatch/queue.tsv}"
 : "${SITEWATCH_RESULTS:=/etc/sitewatch/results.tsv}"
 : "${SITEWATCH_PROXY_OUT:=/etc/sitewatch/proxy-domains.txt}"
@@ -18,6 +20,10 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_FORCE_RESCAN:=0}"
 : "${SITEWATCH_EXCLUDE_DOMAINS:=connectivitycheck.gstatic.com connectivitycheck.android.com}"
 : "${SITEWATCH_CHECK_BASE_DOMAIN:=1}"
+
+if [ "$SITEWATCH_USE_GO" = "1" ] && [ -x "$SITEWATCH_GO_BIN" ]; then
+	exec "$SITEWATCH_GO_BIN" scan
+fi
 
 mkdir -p "$(dirname "$SITEWATCH_RESULTS")"
 touch "$SITEWATCH_QUEUE" "$SITEWATCH_RESULTS" "$SITEWATCH_PROXY_OUT"

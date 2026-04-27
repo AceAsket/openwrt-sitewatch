@@ -4,12 +4,18 @@ set -eu
 CONF="/etc/sitewatch/sitewatch.conf"
 [ -f "$CONF" ] && . "$CONF"
 
+: "${SITEWATCH_GO_BIN:=/usr/bin/sitewatch}"
+: "${SITEWATCH_USE_GO:=1}"
 : "${SITEWATCH_PROXY:=socks5h://127.0.0.1:20170}"
 : "${SITEWATCH_PROXY_OUT:=/etc/sitewatch/proxy-domains.txt}"
 : "${SITEWATCH_TIMEOUT:=7}"
 : "${SITEWATCH_SLOW_SECONDS:=5}"
 : "${SITEWATCH_SLOW_RATIO:=3}"
 : "${SITEWATCH_EXCLUDE_DOMAINS:=connectivitycheck.gstatic.com connectivitycheck.android.com}"
+
+if [ "$SITEWATCH_USE_GO" = "1" ] && [ -x "$SITEWATCH_GO_BIN" ]; then
+	exec "$SITEWATCH_GO_BIN" check-url "$@"
+fi
 
 add_to_proxy="0"
 case "${1:-}" in

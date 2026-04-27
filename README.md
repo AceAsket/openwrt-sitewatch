@@ -11,20 +11,36 @@
 
 ## Что ставить на роутер
 
-Минимально нужны:
+Для shell-fallback и Pi-hole API нужны:
 
 ```sh
 opkg update
 opkg install curl ca-bundle
 ```
 
-Если `curl` собран без proxy/SOCKS, нужен полный вариант `curl`/`libcurl` с поддержкой proxy. Проверка:
+Если Go-бинарник не установлен, сканирование использует shell-fallback через `curl`. Тогда нужен полный вариант `curl`/`libcurl` с поддержкой proxy. Проверка:
 
 ```sh
 curl --version
 ```
 
 В выводе желательно увидеть поддержку `AsynchDNS`, `HTTPS-proxy` или `SOCKS`.
+
+Если установлен бинарник `/usr/bin/sitewatch`, сканирование и ручная проверка URL работают без `curl`: HTTP/HTTPS, HTTP proxy и SOCKS5/SOCKS5H выполняются внутри Go-бинарника. Shell-скрипты остаются совместимым fallback.
+
+Сборка для GL-MT6000 / `aarch64_cortex-a53`:
+
+```sh
+make build-openwrt-arm64
+```
+
+Получится:
+
+```text
+dist/sitewatch-linux-arm64
+```
+
+Установщик положит этот файл в `/usr/bin/sitewatch`, если он есть в `dist/`.
 
 ## Установка
 
