@@ -133,6 +133,20 @@ uhttpd.sitewatch.index_page='cgi-bin/sitewatch'
 
 Если CGI выключен, проверь `/etc/config/uhttpd`: должна быть секция/параметры CGI для `/cgi-bin`.
 
+## Удаление с роутера
+
+Чтобы перенести SiteWatch в контейнер и убрать его с OpenWrt, сначала можно сохранить данные:
+
+```sh
+./uninstall-openwrt.sh --backup /root
+```
+
+По умолчанию скрипт удаляет `uhttpd.sitewatch`, CGI и бинарники из `/usr/bin`, но оставляет `/etc/sitewatch` с настройками, результатами и VPN-списком. Полное удаление данных:
+
+```sh
+./uninstall-openwrt.sh --backup /root --purge-data
+```
+
 ## Настройка
 
 Основной файл:
