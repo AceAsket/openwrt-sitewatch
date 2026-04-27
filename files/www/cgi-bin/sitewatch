@@ -11,6 +11,10 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_CAPTURE_BIN:=/usr/bin/sitewatch-capture}"
 : "${SITEWATCH_CAPTURE_STATUS:=/tmp/sitewatch-capture.status}"
 : "${SITEWATCH_CAPTURE_LOCK:=/tmp/sitewatch-capture.lock}"
+: "${SITEWATCH_PIHOLE_API_ENABLED:=0}"
+: "${SITEWATCH_PIHOLE_URL:=}"
+: "${SITEWATCH_PIHOLE_PASSWORD:=}"
+: "${SITEWATCH_PIHOLE_STATUS:=/tmp/sitewatch-pihole.status}"
 
 html_escape() {
 	sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
@@ -87,6 +91,9 @@ case "$action" in
 		"$SITEWATCH_CAPTURE_BIN" stop >/dev/null 2>&1
 		;;
 	collect)
+		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
+		;;
+	pihole_check)
 		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
 		;;
 	status)
@@ -171,6 +178,26 @@ if [ -n "$capture_status" ]; then
 	fi
 fi
 
+pihole_status_raw="$(cat "$SITEWATCH_PIHOLE_STATUS" 2>/dev/null || true)"
+pihole_state="disabled"
+pihole_count="0"
+pihole_checked=""
+[ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && pihole_state="configured"
+if [ -n "$pihole_status_raw" ]; then
+	pihole_state="$(printf "%s" "$pihole_status_raw" | awk -F '\t' '{print $1}')"
+	pihole_count="$(printf "%s" "$pihole_status_raw" | awk -F '\t' '{print $3}')"
+	pihole_checked="$(printf "%s" "$pihole_status_raw" | awk -F '\t' '{print $4}')"
+fi
+pihole_label="Pi-hole API выключен"
+[ "$pihole_state" = "configured" ] && pihole_label="Pi-hole API настроен, проверка не запускалась"
+[ "$pihole_state" = "ok" ] && pihole_label="Pi-hole API работает, записей: $pihole_count"
+[ "$pihole_state" = "auth_failed" ] && pihole_label="Pi-hole API: ошибка авторизации"
+[ "$pihole_state" = "not_configured" ] && pihole_label="Pi-hole API включен, но URL/пароль не заданы"
+[ -n "$pihole_checked" ] && pihole_checked_human="$(date -d "@$pihole_checked" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$pihole_checked")" || pihole_checked_human="нет"
+[ -n "$SITEWATCH_PIHOLE_URL" ] && pihole_url_label="$SITEWATCH_PIHOLE_URL" || pihole_url_label="не задан"
+pihole_label_e="$(printf "%s" "$pihole_label" | html_escape)"
+pihole_url_e="$(printf "%s" "$pihole_url_label" | html_escape)"
+
 source_title="Р’СЃРµ СѓСЃС‚СЂРѕР№СЃС‚РІР°"
 [ -n "$source_filter" ] && source_title="$source_filter"
 source_title_e="$(printf "%s" "$source_title" | html_escape)"
@@ -211,6 +238,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .health{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:16px}.pill-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.pill-card b{font-size:18px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}.dot.blocked{background:var(--red)}.dot.slow{background:#d99000}.dot.ok{background:var(--green)}.dot.proxy_failed{background:var(--gray)}.dot.unchecked{background:#8a93a3}
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
 .export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.export-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.source-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px;box-shadow:0 12px 30px rgba(20,35,55,.06)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.45)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 .status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}
@@ -223,7 +251,8 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .button.warn{background:#2b2414;border-color:#7a5a1c;color:#ffd37a}
 :root[data-theme="dark"] .button.danger{background:#301b20;border-color:#7b3440;color:#ffb3bb}
 :root[data-theme="dark"] .button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-:root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .pill-card,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
+:root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .pill-card,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel,:root[data-theme="dark"] .source-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
+:root[data-theme="dark"] .source-card{background:#111821}
 :root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select{background:#0f1620;color:var(--text)}
 :root[data-theme="dark"] .chip.active{background:#e7edf5;color:#111821;border-color:#e7edf5}
 :root[data-theme="dark"] .chip.active small{color:#475569}
@@ -236,8 +265,8 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
-@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-actions,.capture-meta{justify-content:flex-start}.toolbar{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.health{grid-template-columns:repeat(2,minmax(0,1fr))}.export-grid{grid-template-columns:repeat(2,minmax(0,1fr))}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
-@media(max-width:560px){.summary,.health,.export-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
+@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-actions,.capture-meta{justify-content:flex-start}.toolbar{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.health{grid-template-columns:repeat(2,minmax(0,1fr))}.export-grid,.source-grid{grid-template-columns:repeat(2,minmax(0,1fr))}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+@media(max-width:560px){.summary,.health,.export-grid,.source-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
 </style>
 </head>
 <body>
@@ -297,6 +326,22 @@ button.button{font:inherit;cursor:pointer}
 <div class="pill-card"><span><span class="dot ok"></span>РќРѕСЂРјР°</span><b>$ok_count</b></div>
 <div class="pill-card"><span><span class="dot proxy_failed"></span>Proxy fail</span><b>$failed_count</b></div>
 <div class="pill-card"><span><span class="dot unchecked"></span>РћР¶РёРґР°СЋС‚</span><b>$unchecked_count</b></div>
+</section>
+
+<section class="source-panel">
+<div class="tool-title">Источники DNS</div>
+<div class="source-grid">
+<div class="source-card">
+<div class="source-row"><b>dnsmasq / logread</b><span class="source-state">local</span></div>
+<div class="muted">Включается на время окна наблюдения, затем выключается обратно.</div>
+</div>
+<div class="source-card">
+<div class="source-row"><b>Pi-hole API</b><span class="source-state">$pihole_state</span></div>
+<div class="muted">$pihole_label_e</div>
+<div class="muted">URL: $pihole_url_e · проверка: $pihole_checked_human</div>
+<div style="margin-top:8px"><a class="button" href="?action=pihole_check$source_q">Проверить Pi-hole</a></div>
+</div>
+</div>
 </section>
 
 <section class="export-panel">

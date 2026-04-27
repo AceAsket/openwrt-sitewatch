@@ -13,6 +13,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_PIHOLE_URL:=}"
 : "${SITEWATCH_PIHOLE_PASSWORD:=}"
 : "${SITEWATCH_PIHOLE_LOOKBACK:=600}"
+: "${SITEWATCH_PIHOLE_STATUS:=/tmp/sitewatch-pihole.status}"
 
 mkdir -p "$(dirname "$SITEWATCH_QUEUE")"
 touch "$SITEWATCH_QUEUE" "$SITEWATCH_SEEN"
@@ -69,6 +70,8 @@ if [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && [ -n "$SITEWATCH_PIHOLE_URL" ] &
 			-H "X-CSRF-TOKEN: $csrf" \
 			"$url/api/queries?disk=true&from=$from_ts" > "$queries" 2>/dev/null || true
 
+		query_count="$(grep -o '"domain":' "$queries" 2>/dev/null | wc -l)"
+		printf "ok\t%s\t%s\t%s\n" "$url" "$query_count" "$(date +%s)" > "$SITEWATCH_PIHOLE_STATUS"
 		sed 's/},{"id":/\n{"id":/g' "$queries" | awk '
 			function field(line, key, out, re) {
 				re = "\"" key "\":\"[^\"]*\"";
@@ -87,7 +90,13 @@ if [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && [ -n "$SITEWATCH_PIHOLE_URL" ] &
 				if (domain != "" && source != "" && source !~ /^127\./ && source != "::1") print source "\t" domain;
 			}
 		' >> "$tmp"
+	else
+		printf "auth_failed\t%s\t0\t%s\n" "$url" "$(date +%s)" > "$SITEWATCH_PIHOLE_STATUS"
 	fi
+elif [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ]; then
+	printf "not_configured\t%s\t0\t%s\n" "${SITEWATCH_PIHOLE_URL:-}" "$(date +%s)" > "$SITEWATCH_PIHOLE_STATUS"
+else
+	printf "disabled\t%s\t0\t%s\n" "${SITEWATCH_PIHOLE_URL:-}" "$(date +%s)" > "$SITEWATCH_PIHOLE_STATUS"
 fi
 
 now="$(date +%s)"
