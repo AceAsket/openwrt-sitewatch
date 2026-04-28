@@ -919,7 +919,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .utility-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px}.utility-grid .source-panel{margin-bottom:0}.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.export-grid{display:grid;grid-template-columns:1fr;gap:8px}.export-grid select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
 .source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:12px;background:rgba(255,255,255,.35)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
 .manual-panel form{display:grid;grid-template-columns:minmax(260px,1fr) auto auto;gap:10px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:38px;padding:8px 10px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}.manual-result:empty{display:none}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.35)}.manual-metric span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}.manual-dpi{grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:rgba(255,255,255,.25)}.manual-dpi summary{cursor:pointer;font-weight:800;color:var(--muted)}.manual-dpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-loading{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.manual-panel.loading .manual-loading{display:flex}.spinner{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-.settings-form{display:grid;grid-template-columns:160px minmax(260px,1fr) minmax(220px,1fr) 110px auto;gap:8px;align-items:end;margin-top:12px}.settings-form label{display:grid;gap:5px;color:var(--muted);font-weight:800}.settings-form input,.settings-form select{width:100%;border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text);font-weight:800}
+.settings-form{display:grid;grid-template-columns:160px minmax(260px,1fr) minmax(220px,1fr) 110px auto;gap:8px;align-items:end;margin-top:12px}.settings-form label{display:grid;gap:5px;color:var(--muted);font-weight:800}.settings-form input,.settings-form select{width:100%;border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text);font-weight:800}.settings-save-status{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.source-panel.saving .settings-save-status{display:flex}.source-panel.saving .settings-form{opacity:.72;pointer-events:none}.button.saving{position:relative}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 th.sortable{cursor:pointer;user-select:none}.sort-indicator{color:var(--muted);font-size:11px;margin-left:4px}
@@ -1103,7 +1103,7 @@ cat <<EOF
 <div class="diag-item"><span class="diag-state $logread_state">logread</span><b>$logread_label_e</b><small>файлы логов ниже</small></div>
 <div class="diag-item"><span class="diag-state $go_state">scan</span><b>$go_label_e</b><small>proxy: $proxy_label_e</small></div>
 </section>
-<div class="source-panel">
+<div class="source-panel" id="settingsPanel">
 <div class="tool-title">Диагностика источников</div>
 <div class="source-grid">
 <div class="source-card">
@@ -1159,8 +1159,9 @@ $agent_ingest_card_html
 $agent_ingest_input_html
 <label>Ingest token <input type="password" name="ingest_token" value="$ingest_token_e" placeholder="общий токен"></label>
 <label>Потоков распознавания <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
-<button class="button primary" type="submit">Сохранить</button>
+<button class="button primary" type="submit" id="settingsSubmit">Сохранить</button>
 </form>
+<div class="settings-save-status" id="settingsSaveStatus"><span class="spinner"></span><span>Сохранение настроек</span></div>
 </div>
 
 </section>
@@ -1254,6 +1255,22 @@ cat <<'EOF'
 </section>
 </section>
 </main>
+<script>
+(function(){
+  var form = document.querySelector('.settings-form');
+  var panel = document.getElementById('settingsPanel');
+  var button = document.getElementById('settingsSubmit');
+  var status = document.getElementById('settingsSaveStatus');
+  if (!form || !panel || !button) return;
+  form.addEventListener('submit', function(){
+    panel.classList.add('saving');
+    button.classList.add('saving');
+    button.disabled = true;
+    button.textContent = 'Сохраняем';
+    if (status) status.setAttribute('aria-live', 'polite');
+  });
+})();
+</script>
 <script>
 (function(){
   var root = document.documentElement;
