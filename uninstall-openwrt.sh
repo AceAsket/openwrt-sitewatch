@@ -50,6 +50,9 @@ done
 if [ -x /usr/bin/sitewatch-capture ]; then
 	/usr/bin/sitewatch-capture stop >/dev/null 2>&1 || true
 fi
+if [ -x /usr/bin/sitewatch-agent ]; then
+	/usr/bin/sitewatch-agent stop >/dev/null 2>&1 || true
+fi
 
 if [ -n "$BACKUP_DIR" ] && [ -d /etc/sitewatch ]; then
 	mkdir -p "$BACKUP_DIR"
@@ -71,6 +74,7 @@ rm -f \
 	/usr/bin/sitewatch \
 	/usr/bin/sitewatch-collect \
 	/usr/bin/sitewatch-capture \
+	/usr/bin/sitewatch-agent \
 	/usr/bin/sitewatch-scan \
 	/usr/bin/sitewatch-check-url
 
@@ -78,6 +82,9 @@ rm -rf /www/sitewatch
 rm -f \
 	/tmp/sitewatch-capture.status \
 	/tmp/sitewatch-capture.stop \
+	/tmp/sitewatch-agent.status \
+	/tmp/sitewatch-agent.stop \
+	/tmp/sitewatch-agent.pid \
 	/tmp/sitewatch-scan.status \
 	/tmp/sitewatch-pihole.status
 rm -rf \

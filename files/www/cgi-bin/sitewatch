@@ -11,6 +11,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_USE_LOGREAD:=1}"
 : "${SITEWATCH_CLEAR_LOGREAD:=1}"
 : "${SITEWATCH_DNSMASQ_CONTROL:=1}"
+: "${SITEWATCH_INGEST_TOKEN:=}"
 : "${SITEWATCH_GO_BIN:=/usr/bin/sitewatch}"
 : "${SITEWATCH_SCAN_BIN:=/usr/bin/sitewatch-scan}"
 : "${SITEWATCH_COLLECT_BIN:=/usr/bin/sitewatch-collect}"
@@ -205,6 +206,53 @@ num_or_zero() {
 	esac
 }
 
+valid_ingest_domain() {
+	awk -v s="$1" 'BEGIN {
+		gsub(/\.$/, "", s);
+		s = tolower(s);
+		if (s == "" || s ~ /[^a-z0-9.-]/ || s !~ /\./ || s ~ /\.local$/ || s ~ /\.lan$/ || s ~ /\.arpa$/ || s ~ /^_/) exit 1;
+		print s;
+	}'
+}
+
+ingest_event() {
+	source="$1"
+	domain="$2"
+	event_ts="$3"
+	[ -n "$source" ] || return 1
+	domain="$(valid_ingest_domain "$domain" 2>/dev/null || true)"
+	[ -n "$domain" ] || return 1
+	case "$event_ts" in ""|*[!0-9]*) event_ts="$(date +%s)" ;; esac
+	mkdir -p "$(dirname "$SITEWATCH_SEEN")"
+	touch "$SITEWATCH_SEEN" "$SITEWATCH_QUEUE"
+	lock="/tmp/sitewatch-ingest.lock"
+	attempts=0
+	while ! mkdir "$lock" 2>/dev/null; do
+		attempts=$((attempts + 1))
+		[ "$attempts" -ge 5 ] && return 1
+		sleep 1
+	done
+	tmp="/tmp/sitewatch-ingest.$$"
+	awk -F '\t' -v source="$source" -v domain="$domain" -v now="$event_ts" '
+		BEGIN { OFS = "\t" }
+		$1 == source && $2 == domain {
+			if ($3 == "" || $3 == "0") $3 = now;
+			$4 = now;
+			$5 = $5 + 1;
+			done = 1;
+			print;
+			next;
+		}
+		{ print }
+		END {
+			if (!done) print source, domain, now, now, 1;
+		}
+	' "$SITEWATCH_SEEN" > "$tmp" && mv "$tmp" "$SITEWATCH_SEEN" && cp "$SITEWATCH_SEEN" "$SITEWATCH_QUEUE"
+	rm -f "$tmp"
+	rmdir "$lock" 2>/dev/null || true
+	return 0
+}
+
 print_metrics() {
 	now="$(date +%s)"
 	capture_raw="$(cat "$SITEWATCH_CAPTURE_STATUS" 2>/dev/null || true)"
@@ -320,6 +368,10 @@ source_filter="$(safe_token "$(param source)")"
 duration="$(safe_token "$(param duration)")"
 manual_url="$(url_decode_light "$(param url)")"
 manual_add="$(safe_token "$(param add)")"
+ingest_source="$(safe_token "$(param source)")"
+ingest_domain="$(safe_token "$(param domain)")"
+ingest_ts="$(safe_token "$(param ts)")"
+ingest_token="$(safe_token "$(param token)")"
 scan_workers="$(normalize_scan_workers "$(safe_token "$(param scan_workers)")")"
 [ -n "$scan_workers" ] || scan_workers="$(normalize_scan_workers "$SITEWATCH_SCAN_WORKERS")"
 [ -n "$scan_workers" ] || scan_workers=4
@@ -350,6 +402,20 @@ case "$action" in
 		;;
 	save_settings)
 		save_config_value SITEWATCH_SCAN_WORKERS "$scan_workers"
+		;;
+	ingest)
+		if [ -n "$SITEWATCH_INGEST_TOKEN" ] && [ "$ingest_token" != "$SITEWATCH_INGEST_TOKEN" ]; then
+			printf "Status: 403 Forbidden\r\n"
+			printf "Content-Type: text/plain; charset=utf-8\r\n\r\nforbidden\n"
+			exit 0
+		fi
+		printf "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+		if ingest_event "$ingest_source" "$ingest_domain" "$ingest_ts"; then
+			printf "ok\n"
+		else
+			printf "error\n"
+		fi
+		exit 0
 		;;
 	status)
 		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1

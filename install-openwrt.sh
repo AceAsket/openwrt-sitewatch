@@ -30,12 +30,13 @@ elif [ -f ./dist/sitewatch-linux-arm64 ]; then
 fi
 cp ./files/usr/bin/sitewatch-collect /usr/bin/sitewatch-collect
 cp ./files/usr/bin/sitewatch-capture /usr/bin/sitewatch-capture
+cp ./files/usr/bin/sitewatch-agent /usr/bin/sitewatch-agent
 cp ./files/usr/bin/sitewatch-scan /usr/bin/sitewatch-scan
 cp ./files/usr/bin/sitewatch-check-url /usr/bin/sitewatch-check-url
 cp ./files/www/cgi-bin/sitewatch /www/sitewatch/cgi-bin/sitewatch
 cp ./files/www/cgi-bin/metrics /www/sitewatch/cgi-bin/metrics
 
-chmod +x /usr/bin/sitewatch-collect /usr/bin/sitewatch-capture /usr/bin/sitewatch-scan /usr/bin/sitewatch-check-url /www/sitewatch/cgi-bin/sitewatch /www/sitewatch/cgi-bin/metrics
+chmod +x /usr/bin/sitewatch-collect /usr/bin/sitewatch-capture /usr/bin/sitewatch-agent /usr/bin/sitewatch-scan /usr/bin/sitewatch-check-url /www/sitewatch/cgi-bin/sitewatch /www/sitewatch/cgi-bin/metrics
 touch /etc/sitewatch/seen.tsv /etc/sitewatch/queue.tsv /etc/sitewatch/results.tsv /etc/sitewatch/proxy-domains.txt
 
 if command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/uhttpd ]; then
@@ -57,3 +58,4 @@ fi
 echo "Installed. Open: http://<router-ip>:8095/"
 echo "Needed packages for shell fallback and Pi-hole API: curl ca-bundle."
 echo "If a matching dist/sitewatch-linux-* binary was present, scan/check-url use /usr/bin/sitewatch without curl."
+echo "For container mode, configure SITEWATCH_AGENT_INGEST_URL and run: sitewatch-agent 45"

@@ -1,0 +1,155 @@
+#!/bin/ash
+set -eu
+
+CONF="/etc/sitewatch/sitewatch.conf"
+[ -f "$CONF" ] && . "$CONF"
+
+: "${SITEWATCH_AGENT_INGEST_URL:=}"
+: "${SITEWATCH_INGEST_TOKEN:=}"
+: "${SITEWATCH_AGENT_STATUS:=/tmp/sitewatch-agent.status}"
+: "${SITEWATCH_AGENT_STOP:=/tmp/sitewatch-agent.stop}"
+: "${SITEWATCH_AGENT_PID:=/tmp/sitewatch-agent.pid}"
+: "${SITEWATCH_DNSMASQ_CONTROL:=1}"
+
+duration="${1:-45}"
+case "$duration" in
+	stop)
+		touch "$SITEWATCH_AGENT_STOP"
+		if [ -f "$SITEWATCH_AGENT_PID" ]; then
+			kill -TERM "$(cat "$SITEWATCH_AGENT_PID" 2>/dev/null)" 2>/dev/null || true
+		fi
+		now="$(date +%s)"
+		printf "stopped\t%s\t0\t%s\t0\n" "$now" "$now" > "$SITEWATCH_AGENT_STATUS"
+		exit 0
+		;;
+	''|*[!0-9]*) duration=45 ;;
+esac
+
+if [ -z "$SITEWATCH_AGENT_INGEST_URL" ]; then
+	echo "SITEWATCH_AGENT_INGEST_URL is not configured" >&2
+	exit 2
+fi
+if ! command -v logread >/dev/null 2>&1; then
+	echo "logread is required" >&2
+	exit 2
+fi
+if ! command -v wget >/dev/null 2>&1; then
+	echo "wget is required" >&2
+	exit 2
+fi
+
+if [ "$duration" != "0" ]; then
+	[ "$duration" -lt 5 ] && duration=5
+	[ "$duration" -gt 3600 ] && duration=3600
+fi
+
+if [ -f "$SITEWATCH_AGENT_PID" ] && kill -0 "$(cat "$SITEWATCH_AGENT_PID" 2>/dev/null)" 2>/dev/null; then
+	echo "sitewatch-agent already running"
+	exit 0
+fi
+
+mkdir -p "$(dirname "$SITEWATCH_AGENT_STATUS")"
+rm -f "$SITEWATCH_AGENT_STOP"
+printf "%s\n" "$$" > "$SITEWATCH_AGENT_PID"
+
+have_dnsmasq_control=0
+prev="__absent__"
+if [ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/dnsmasq ]; then
+	have_dnsmasq_control=1
+	prev="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo __absent__)"
+fi
+
+fifo="/tmp/sitewatch-agent-log.$$"
+logread_pid=""
+sent_count=0
+start_ts="$(date +%s)"
+last_ts="$start_ts"
+
+restore() {
+	if [ -n "$logread_pid" ]; then
+		kill "$logread_pid" 2>/dev/null || true
+	fi
+	rm -f "$fifo" "$SITEWATCH_AGENT_PID"
+	if [ "$have_dnsmasq_control" = "1" ]; then
+		if [ "$prev" = "__absent__" ]; then
+			uci -q delete dhcp.@dnsmasq[0].logqueries || true
+		else
+			uci set dhcp.@dnsmasq[0].logqueries="$prev"
+		fi
+		uci commit dhcp
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+	fi
+	state="done"
+	[ -f "$SITEWATCH_AGENT_STOP" ] && state="stopped"
+	now="$(date +%s)"
+	printf "%s\t%s\t%s\t%s\t%s\n" "$state" "$start_ts" "$duration" "$now" "$sent_count" > "$SITEWATCH_AGENT_STATUS"
+	rm -f "$SITEWATCH_AGENT_STOP"
+}
+
+trap 'restore' EXIT INT TERM
+
+if [ "$have_dnsmasq_control" = "1" ]; then
+	uci set dhcp.@dnsmasq[0].logqueries="1"
+	uci commit dhcp
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+fi
+
+mkfifo "$fifo"
+logread -f > "$fifo" 2>/dev/null &
+logread_pid="$!"
+exec 3< "$fifo"
+
+printf "running\t%s\t%s\t%s\t0\n" "$start_ts" "$duration" "$start_ts" > "$SITEWATCH_AGENT_STATUS"
+
+post_event() {
+	source="$1"
+	domain="$2"
+	ts="$3"
+	[ -n "$source" ] && [ -n "$domain" ] || return 0
+	case "$source" in 127.*|::1) return 0 ;; esac
+	case "$domain" in
+		*[^A-Za-z0-9.-]*|.*|*.local|*.lan|*.arpa|"") return 0 ;;
+	esac
+	case "$SITEWATCH_AGENT_INGEST_URL" in
+		*\?*) sep="&" ;;
+		*) sep="?" ;;
+	esac
+	url="${SITEWATCH_AGENT_INGEST_URL}${sep}action=ingest&source=${source}&domain=${domain}&ts=${ts}"
+	[ -n "$SITEWATCH_INGEST_TOKEN" ] && url="${url}&token=${SITEWATCH_INGEST_TOKEN}"
+	if wget -q -O - "$url" >/dev/null 2>&1; then
+		sent_count=$((sent_count + 1))
+		last_ts="$ts"
+		printf "running\t%s\t%s\t%s\t%s\n" "$start_ts" "$duration" "$last_ts" "$sent_count" > "$SITEWATCH_AGENT_STATUS"
+	fi
+}
+
+while :; do
+	line=""
+	if read -r -t 1 line <&3; then
+		case "$line" in
+			*query\[*" from "*)
+				event="$(printf "%s\n" "$line" | awk '
+					/query\[[^]]+\]/ && / from / {
+						domain = "";
+						source = "";
+						for (i = 1; i <= NF; i++) {
+							if ($i ~ /^query\[/ && (i + 1) <= NF) domain = $(i + 1);
+							if ($i == "from" && (i + 1) <= NF) source = $(i + 1);
+						}
+						if (domain != "" && source != "") print source "\t" domain;
+					}
+				')"
+				if [ -n "$event" ]; then
+					source="${event%%	*}"
+					domain="${event#*	}"
+					post_event "$source" "$domain" "$(date +%s)"
+				fi
+				;;
+		esac
+	fi
+	[ -f "$SITEWATCH_AGENT_STOP" ] && break
+	if [ "$duration" != "0" ]; then
+		now="$(date +%s)"
+		[ $((now - start_ts)) -ge "$duration" ] && break
+	fi
+done

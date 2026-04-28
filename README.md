@@ -115,6 +115,37 @@ SITEWATCH_PIHOLE_PASSWORD: "<password>"
 
 Если v2rayA работает на роутере, укажи роутер вместо `host.docker.internal`, например `http://192.168.1.1:20171`. Если контейнер нужен только для ручной проверки и Pi-hole API, DNS-логи можно не монтировать. Если есть только логи без Pi-hole API, оставь `SITEWATCH_PIHOLE_API_ENABLED="0"` и примонтируй нужные файлы в `/logs`.
 
+### Агент на OpenWrt для контейнера
+
+Если SiteWatch работает в контейнере, а Pi-hole нет, лучше не читать лог-файлы с роутера по сети. Поставь на OpenWrt только маленький `sitewatch-agent`: он временно включает `dnsmasq logqueries`, читает `logread -f`, парсит DNS-запросы в потоке и отправляет в контейнер уже готовые пары `source/domain`.
+
+На роутере в `/etc/sitewatch/sitewatch.conf`:
+
+```sh
+SITEWATCH_AGENT_INGEST_URL="http://<container-host>:8095/cgi-bin/sitewatch"
+SITEWATCH_INGEST_TOKEN="<optional-shared-token>"
+```
+
+В контейнере задай такой же `SITEWATCH_INGEST_TOKEN`, если используешь токен. Запуск короткого окна на роутере:
+
+```sh
+sitewatch-agent 45
+```
+
+Live-режим без таймера:
+
+```sh
+sitewatch-agent 0
+```
+
+Остановка:
+
+```sh
+sitewatch-agent stop
+```
+
+Агент не пишет растущий DNS-лог на роутере: он держит только маленький статус в `/tmp/sitewatch-agent.status` и отправляет события в ingest endpoint контейнера.
+
 Для Prometheus в контейнере и на OpenWrt доступен scrape endpoint:
 
 ```text
