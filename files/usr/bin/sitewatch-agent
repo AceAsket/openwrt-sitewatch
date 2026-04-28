@@ -11,6 +11,16 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_AGENT_PID:=/tmp/sitewatch-agent.pid}"
 : "${SITEWATCH_DNSMASQ_CONTROL:=1}"
 
+normalize_container_addr() {
+	value="$(printf "%s" "$1" | sed 's/[[:space:]]//g')"
+	value="${value#http://}"
+	value="${value#https://}"
+	value="${value%%/*}"
+	value="${value%%\?*}"
+	value="${value%%#*}"
+	printf "%s" "$value"
+}
+
 duration="${1:-45}"
 case "$duration" in
 	stop)
@@ -25,6 +35,7 @@ case "$duration" in
 	''|*[!0-9]*) duration=45 ;;
 esac
 
+SITEWATCH_AGENT_INGEST_URL="$(normalize_container_addr "$SITEWATCH_AGENT_INGEST_URL")"
 if [ -z "$SITEWATCH_AGENT_INGEST_URL" ]; then
 	echo "SITEWATCH_AGENT_INGEST_URL is not configured" >&2
 	exit 2
@@ -110,11 +121,7 @@ post_event() {
 	case "$domain" in
 		*[^A-Za-z0-9.-]*|.*|*.local|*.lan|*.arpa|"") return 0 ;;
 	esac
-	case "$SITEWATCH_AGENT_INGEST_URL" in
-		*\?*) sep="&" ;;
-		*) sep="?" ;;
-	esac
-	url="${SITEWATCH_AGENT_INGEST_URL}${sep}action=ingest&source=${source}&domain=${domain}&ts=${ts}"
+	url="http://${SITEWATCH_AGENT_INGEST_URL}/cgi-bin/sitewatch?action=ingest&source=${source}&domain=${domain}&ts=${ts}"
 	[ -n "$SITEWATCH_INGEST_TOKEN" ] && url="${url}&token=${SITEWATCH_INGEST_TOKEN}"
 	if wget -q -O - "$url" >/dev/null 2>&1; then
 		sent_count=$((sent_count + 1))

@@ -60,6 +60,16 @@ normalize_run_mode() {
 	esac
 }
 
+normalize_container_addr() {
+	value="$(printf "%s" "$1" | sed 's/[[:space:]]//g')"
+	value="${value#http://}"
+	value="${value#https://}"
+	value="${value%%/*}"
+	value="${value%%\?*}"
+	value="${value%%#*}"
+	printf "%s" "$value"
+}
+
 save_config_value() {
 	key="$1"
 	value="$2"
@@ -409,13 +419,14 @@ if [ -n "$run_mode_param" ]; then
 else
 	run_mode="$(normalize_run_mode "$SITEWATCH_RUN_MODE")"
 fi
-agent_ingest_url="$(url_decode_light "$(param agent_ingest_url)")"
+agent_ingest_url="$(normalize_container_addr "$(url_decode_light "$(param agent_ingest_url)")")"
 settings_token="$(safe_token "$(param ingest_token)")"
 scan_workers="$(normalize_scan_workers "$(safe_token "$(param scan_workers)")")"
 [ -n "$scan_workers" ] || scan_workers="$(normalize_scan_workers "$SITEWATCH_SCAN_WORKERS")"
 [ -n "$scan_workers" ] || scan_workers=4
 SITEWATCH_SCAN_WORKERS="$scan_workers"
 SITEWATCH_RUN_MODE="$(normalize_run_mode "$SITEWATCH_RUN_MODE")"
+SITEWATCH_AGENT_INGEST_URL="$(normalize_container_addr "$SITEWATCH_AGENT_INGEST_URL")"
 active_capture_bin="$SITEWATCH_CAPTURE_BIN"
 active_capture_status="$SITEWATCH_CAPTURE_STATUS"
 if [ "$SITEWATCH_RUN_MODE" = "agent" ]; then
@@ -1119,7 +1130,7 @@ cat <<EOF
 <option value="agent" $run_mode_agent_selected>Агент в контейнер</option>
 </select>
 </label>
-<label>URL контейнера <input type="text" name="agent_ingest_url" value="$agent_ingest_url_e" placeholder="http://192.168.1.10:8095/cgi-bin/sitewatch"></label>
+<label>Адрес контейнера <input type="text" name="agent_ingest_url" value="$agent_ingest_url_e" placeholder="192.168.1.10:8095"></label>
 <label>Ingest token <input type="password" name="ingest_token" value="$ingest_token_e" placeholder="общий токен"></label>
 <label>Потоков распознавания <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
 <button class="button primary" type="submit">Сохранить</button>
