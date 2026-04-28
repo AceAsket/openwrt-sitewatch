@@ -771,6 +771,12 @@ ingest_token_e="$(printf "%s" "$SITEWATCH_INGEST_TOKEN" | html_escape)"
 run_mode_native_selected=""
 run_mode_agent_selected=""
 [ "$SITEWATCH_RUN_MODE" = "agent" ] && run_mode_agent_selected="selected" || run_mode_native_selected="selected"
+agent_ingest_card_html=""
+agent_ingest_input_html=""
+if [ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ]; then
+	agent_ingest_card_html="<div class=\"source-card\"><b>Ingest контейнера</b><div class=\"muted\">$agent_ingest_url_label_e</div></div>"
+	agent_ingest_input_html="<label>Адрес контейнера <input type=\"text\" name=\"agent_ingest_url\" value=\"$agent_ingest_url_e\" placeholder=\"192.168.1.10:8095\"></label>"
+fi
 metrics_path="/cgi-bin/metrics"
 metrics_path_e="$(printf "%s" "$metrics_path" | html_escape)"
 diagnostic_logs_html="$(
@@ -1112,7 +1118,7 @@ cat <<EOF
 <div class="source-grid">
 <div class="source-card"><b>Режим работы</b><div class="muted">$run_mode_label_e</div></div>
 <div class="source-card"><b>Назначение режима</b><div class="muted">$run_mode_hint_e</div></div>
-<div class="source-card"><b>Ingest контейнера</b><div class="muted">$agent_ingest_url_label_e</div></div>
+$agent_ingest_card_html
 <div class="source-card"><b>Ingest token</b><div class="muted">$ingest_token_label_e</div></div>
 <div class="source-card"><b>Proxy v2rayA</b><div class="muted">$proxy_label_e</div></div>
 <div class="source-card"><b>Потоков распознавания</b><div class="muted">$scan_workers_e</div></div>
@@ -1130,7 +1136,7 @@ cat <<EOF
 <option value="agent" $run_mode_agent_selected>Агент в контейнер</option>
 </select>
 </label>
-<label>Адрес контейнера <input type="text" name="agent_ingest_url" value="$agent_ingest_url_e" placeholder="192.168.1.10:8095"></label>
+$agent_ingest_input_html
 <label>Ingest token <input type="password" name="ingest_token" value="$ingest_token_e" placeholder="общий токен"></label>
 <label>Потоков распознавания <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
 <button class="button primary" type="submit">Сохранить</button>
