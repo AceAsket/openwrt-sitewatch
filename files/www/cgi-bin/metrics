@@ -1,0 +1,5 @@
+#!/bin/ash
+
+QUERY_STRING="action=metrics"
+export QUERY_STRING
+exec /www/sitewatch/cgi-bin/sitewatch

@@ -10,6 +10,8 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_LOG_FILES:=/var/log/pihole/pihole.log /tmp/log/dnsmasq.log /var/log/messages}"
 : "${SITEWATCH_USE_LOGREAD:=1}"
 : "${SITEWATCH_CLEAR_LOGREAD:=1}"
+: "${SITEWATCH_DNSMASQ_CONTROL:=1}"
+: "${SITEWATCH_GO_BIN:=/usr/bin/sitewatch}"
 : "${SITEWATCH_SCAN_BIN:=/usr/bin/sitewatch-scan}"
 : "${SITEWATCH_COLLECT_BIN:=/usr/bin/sitewatch-collect}"
 : "${SITEWATCH_CAPTURE_BIN:=/usr/bin/sitewatch-capture}"
@@ -192,6 +194,71 @@ dpi_note() {
 	esac
 }
 
+prom_escape() {
+	printf "%s" "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+num_or_zero() {
+	case "$1" in
+		""|*[!0-9]*) printf "0" ;;
+		*) printf "%s" "$1" ;;
+	esac
+}
+
+print_metrics() {
+	now="$(date +%s)"
+	capture_raw="$(cat "$SITEWATCH_CAPTURE_STATUS" 2>/dev/null || true)"
+	scan_raw="$(cat "$SITEWATCH_SCAN_STATUS" 2>/dev/null || true)"
+	pihole_raw="$(cat "$SITEWATCH_PIHOLE_STATUS" 2>/dev/null || true)"
+	capture_state_m="$(printf "%s" "$capture_raw" | awk -F '\t' '{print $1}')"
+	scan_state_m="$(printf "%s" "$scan_raw" | awk -F '\t' '{print $1}')"
+	scan_total_m="$(printf "%s" "$scan_raw" | awk -F '\t' '{print $3}')"
+	scan_done_m="$(printf "%s" "$scan_raw" | awk -F '\t' '{print $4}')"
+	pihole_state_m="disabled"
+	pihole_count_m="0"
+	seen_metrics_file="$SITEWATCH_SEEN"
+	results_metrics_file="$SITEWATCH_RESULTS"
+	[ -f "$seen_metrics_file" ] || seen_metrics_file="/dev/null"
+	[ -f "$results_metrics_file" ] || results_metrics_file="/dev/null"
+	[ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && pihole_state_m="configured"
+	if [ -n "$pihole_raw" ]; then
+		pihole_state_m="$(printf "%s" "$pihole_raw" | awk -F '\t' '{print $1}')"
+		pihole_count_m="$(printf "%s" "$pihole_raw" | awk -F '\t' '{print $3}')"
+	fi
+	if command -v uci >/dev/null 2>&1; then
+		dns_logging_m="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo 0)"
+	else
+		dns_logging_m="0"
+	fi
+	printf "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\r\n"
+	printf "# HELP sitewatch_info SiteWatch build information.\n"
+	printf "# TYPE sitewatch_info gauge\n"
+	printf "sitewatch_info{version=\"%s\"} 1\n" "$(prom_escape "$SITEWATCH_VERSION")"
+	printf "# HELP sitewatch_seen_pairs_total Observed source/domain pairs.\n# TYPE sitewatch_seen_pairs_total gauge\n"
+	awk -F '\t' 'BEGIN{n=0;q=0}{n++;q+=$5}END{printf "sitewatch_seen_pairs_total %d\nsitewatch_dns_queries_total %d\n", n, q}' "$seen_metrics_file" 2>/dev/null
+	printf "# HELP sitewatch_results_total Scan results by status.\n# TYPE sitewatch_results_total gauge\n"
+	awk -F '\t' 'BEGIN{status["blocked"]=0;status["slow"]=0;status["ok"]=0;status["proxy_failed"]=0}{status[$4]++}END{for(s in status) printf "sitewatch_results_total{status=\"%s\"} %d\n", s, status[s]}' "$results_metrics_file" 2>/dev/null
+	pending_m="$(awk -F '\t' 'FNR == NR { result[$1] = 1; next } !result[$2] && !seen[$2]++ { n++ } END { print n + 0 }' "$results_metrics_file" "$seen_metrics_file" 2>/dev/null)"
+	printf "# HELP sitewatch_pending_domains Domains waiting for scan.\n# TYPE sitewatch_pending_domains gauge\nsitewatch_pending_domains %s\n" "$(num_or_zero "$pending_m")"
+	proxy_count_m="0"
+	[ -f "$SITEWATCH_PROXY_OUT" ] && proxy_count_m="$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
+	printf "# HELP sitewatch_proxy_domains Domains in VPN export list.\n# TYPE sitewatch_proxy_domains gauge\nsitewatch_proxy_domains %s\n" "$(num_or_zero "$proxy_count_m")"
+	[ "$capture_state_m" = "running" ] && capture_running_m=1 || capture_running_m=0
+	[ "$scan_state_m" = "running" ] && scan_running_m=1 || scan_running_m=0
+	printf "# HELP sitewatch_capture_running Capture window state.\n# TYPE sitewatch_capture_running gauge\nsitewatch_capture_running %s\n" "$capture_running_m"
+	printf "# HELP sitewatch_scan_running Scan worker state.\n# TYPE sitewatch_scan_running gauge\nsitewatch_scan_running %s\n" "$scan_running_m"
+	printf "# HELP sitewatch_scan_progress Current scan batch progress.\n# TYPE sitewatch_scan_progress gauge\nsitewatch_scan_progress{part=\"done\"} %s\nsitewatch_scan_progress{part=\"total\"} %s\n" "$(num_or_zero "$scan_done_m")" "$(num_or_zero "$scan_total_m")"
+	printf "# HELP sitewatch_dnsmasq_control_enabled Whether SiteWatch is allowed to control local dnsmasq logging.\n# TYPE sitewatch_dnsmasq_control_enabled gauge\nsitewatch_dnsmasq_control_enabled %s\n" "$([ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && echo 1 || echo 0)"
+	printf "# HELP sitewatch_dnsmasq_logging_enabled Current dnsmasq query logging state when readable.\n# TYPE sitewatch_dnsmasq_logging_enabled gauge\nsitewatch_dnsmasq_logging_enabled %s\n" "$([ "$dns_logging_m" = "1" ] && echo 1 || echo 0)"
+	printf "# HELP sitewatch_pihole_imported_pairs Last imported source/domain pairs from Pi-hole API.\n# TYPE sitewatch_pihole_imported_pairs gauge\nsitewatch_pihole_imported_pairs{status=\"%s\"} %s\n" "$(prom_escape "$pihole_state_m")" "$(num_or_zero "$pihole_count_m")"
+	printf "# HELP sitewatch_log_file_readable Configured DNS log file readability.\n# TYPE sitewatch_log_file_readable gauge\n"
+	for log in $SITEWATCH_LOG_FILES; do
+		[ -r "$log" ] && readable=1 || readable=0
+		printf "sitewatch_log_file_readable{path=\"%s\"} %s\n" "$(prom_escape "$log")" "$readable"
+	done
+	printf "# HELP sitewatch_last_scrape_timestamp_seconds SiteWatch metrics render time.\n# TYPE sitewatch_last_scrape_timestamp_seconds gauge\nsitewatch_last_scrape_timestamp_seconds %s\n" "$now"
+}
+
 print_domain_rows() {
 	source_filter="$1"
 	rows="$(
@@ -294,7 +361,13 @@ case "$action" in
 		printf "seen=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $1 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_SEEN" 2>/dev/null)"
 		printf "results=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $2 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
 		printf "pending=%s\n" "$(awk -F '\t' -v source_filter="$source_filter" 'FNR == NR { if (source_filter == "" || $2 == source_filter) result[$1] = 1; next } (source_filter == "" || $1 == source_filter) && !result[$2] && !seen[$2]++ { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" "$SITEWATCH_SEEN" 2>/dev/null)"
-		printf "proxy=%s\n" "$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
+		proxy_status_count="0"
+		[ -f "$SITEWATCH_PROXY_OUT" ] && proxy_status_count="$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
+		printf "proxy=%s\n" "$proxy_status_count"
+		exit 0
+		;;
+	metrics)
+		print_metrics
 		exit 0
 		;;
 	rows)
@@ -405,7 +478,8 @@ filter_awk='1'
 
 total_seen="$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $1 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_SEEN" 2>/dev/null)"
 total_results="$(awk -F '\t' -v source_filter="$source_filter" 'source_filter == "" || $2 == source_filter { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
-total_proxy="$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
+total_proxy="0"
+[ -f "$SITEWATCH_PROXY_OUT" ] && total_proxy="$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
 blocked_count="$(awk -F '\t' -v source_filter="$source_filter" '$4 == "blocked" && (source_filter == "" || $2 == source_filter) { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
 slow_count="$(awk -F '\t' -v source_filter="$source_filter" '$4 == "slow" && (source_filter == "" || $2 == source_filter) { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
 ok_count="$(awk -F '\t' -v source_filter="$source_filter" '$4 == "ok" && (source_filter == "" || $2 == source_filter) { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
@@ -503,6 +577,45 @@ pihole_label="Pi-hole API выключен"
 pihole_label_e="$(printf "%s" "$pihole_label" | html_escape)"
 pihole_url_e="$(printf "%s" "$pihole_url_label" | html_escape)"
 
+if [ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/dnsmasq ]; then
+	mode_label="Нативный OpenWrt"
+	mode_hint="Локальный dnsmasq управляется на время окна наблюдения"
+	mode_state="ok"
+elif [ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ]; then
+	mode_label="Нативный режим"
+	mode_hint="Управление dnsmasq включено, но uci/dnsmasq недоступны"
+	mode_state="warn"
+else
+	mode_label="Контейнер / удаленный сбор"
+	mode_hint="dnsmasq не управляется, используются примонтированные логи и Pi-hole API"
+	mode_state="off"
+fi
+[ "$SITEWATCH_USE_LOGREAD" = "1" ] && command -v logread >/dev/null 2>&1 && logread_state="ok" && logread_label="logread доступен" || logread_state="off"
+[ -n "$logread_label" ] || logread_label="logread выключен или недоступен"
+[ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && dnsmasq_control_label="управление включено" || dnsmasq_control_label="управление выключено"
+[ -x "$SITEWATCH_GO_BIN" ] && go_state="ok" && go_label="Go-бинарник активен" || go_state="warn"
+[ -n "$go_label" ] || go_label="fallback shell/curl"
+[ -n "$SITEWATCH_PROXY" ] && proxy_label="$SITEWATCH_PROXY" || proxy_label="не задан"
+mode_label_e="$(printf "%s" "$mode_label" | html_escape)"
+mode_hint_e="$(printf "%s" "$mode_hint" | html_escape)"
+dnsmasq_control_label_e="$(printf "%s" "$dnsmasq_control_label" | html_escape)"
+logread_label_e="$(printf "%s" "$logread_label" | html_escape)"
+go_label_e="$(printf "%s" "$go_label" | html_escape)"
+proxy_label_e="$(printf "%s" "$proxy_label" | html_escape)"
+metrics_path="/cgi-bin/metrics"
+metrics_path_e="$(printf "%s" "$metrics_path" | html_escape)"
+diagnostic_logs_html="$(
+	for log in $SITEWATCH_LOG_FILES; do
+		log_e="$(printf "%s" "$log" | html_escape)"
+		if [ -r "$log" ]; then
+			lines="$(wc -l < "$log" 2>/dev/null || echo 0)"
+			printf '<div class="diag-item"><span class="diag-state ok">ok</span><b>%s</b><small>%s строк</small></div>\n' "$log_e" "$lines"
+		else
+			printf '<div class="diag-item"><span class="diag-state off">off</span><b>%s</b><small>не читается</small></div>\n' "$log_e"
+		fi
+	done
+)"
+
 source_title="Все устройства"
 [ -n "$source_filter" ] && source_title="$source_filter"
 source_title_e="$(printf "%s" "$source_title" | html_escape)"
@@ -594,6 +707,7 @@ main{max-width:1180px;margin:0 auto;padding:24px}
 h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-top:4px}
 .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}.version{border:1px solid var(--line);border-radius:999px;padding:4px 8px;color:var(--muted);font-size:12px;font-weight:800;background:var(--panel)}.button{border:1px solid var(--line);background:var(--panel);border-radius:7px;color:var(--text);display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 11px;text-decoration:none;font-weight:650;box-shadow:0 1px 1px rgba(15,23,42,.04)}
 .button.primary{background:var(--blue);border-color:var(--blue);color:white}.button.warn{background:#fff7df;border-color:#f0d27a;color:#6f4a00}.button.danger{background:#fff0f1;border-color:#efb8be;color:#9f1d2a}.button:hover{border-color:#b7c2d1}
+.mode-strip{display:grid;grid-template-columns:minmax(0,1.5fr) repeat(3,minmax(0,1fr));gap:8px;margin-bottom:14px}.diag-item{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:10px 12px;min-width:0}.diag-item b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.diag-item small{display:block;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.diag-state{display:inline-flex;border-radius:999px;padding:2px 7px;margin-bottom:6px;font-size:11px;font-weight:900;text-transform:uppercase}.diag-state.ok{background:#e7f4ea;color:var(--green)}.diag-state.warn{background:#fff3cf;color:var(--amber)}.diag-state.off{background:#eef1f5;color:#596273}.diag-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
 .toolbar{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;margin-bottom:14px}.tool{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}
 .tool form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.tool input,.tool select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}.capture-controls.running .capture-start-field,.capture-controls.running .capture-live-link{display:none}
 .tool-title{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:800;margin-bottom:8px}.capture{color:var(--muted);font-size:13px;margin-top:8px}.summary{display:grid;grid-template-columns:1.2fr repeat(4,1fr);gap:10px;margin-bottom:14px}
@@ -638,10 +752,11 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.ok{background:#173322;color:#6ee092}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
+:root[data-theme="dark"] .diag-state.ok{background:#173322;color:#6ee092}:root[data-theme="dark"] .diag-state.warn{background:#332713;color:#ffd37a}:root[data-theme="dark"] .diag-state.off{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
 :root[data-theme="dark"] .scan-progress{background:var(--panel)}:root[data-theme="dark"] .bar{background:#202a37}
-@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.capture-banner{grid-template-columns:1fr}.capture-meta{justify-content:flex-start}.toolbar,.utility-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-panel form{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
-@media(max-width:560px){.summary,.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
+@media(max-width:900px){main{padding:14px}.top{display:block}.actions{justify-content:flex-start;margin-top:14px}.mode-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.capture-banner{grid-template-columns:1fr}.capture-meta{justify-content:flex-start}.toolbar,.utility-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stat.wide{grid-column:1/-1}.source-grid,.manual-result,.manual-dpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.manual-panel form{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none}}
+@media(max-width:560px){.summary,.source-grid,.manual-result,.manual-dpi-grid,.mode-strip,.diag-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
 </style>
 </head>
 <body>
@@ -650,8 +765,16 @@ button.button{font:inherit;cursor:pointer}
 <div class="brand"><div class="mark">SW</div><div><h1>SiteWatch</h1><div class="subtitle">Мониторинг блокировок по устройствам без постоянного DNS-логирования</div></div></div>
 <div class="actions">
 <span class="version">$sitewatch_version_e</span>
+<a class="button" href="$metrics_path_e">Metrics</a>
 <button class="button" id="themeToggle" type="button">Dark</button>
 </div>
+</section>
+
+<section class="mode-strip">
+<div class="diag-item"><span class="diag-state $mode_state">mode</span><b>$mode_label_e</b><small>$mode_hint_e</small></div>
+<div class="diag-item"><span class="diag-state $([ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && echo ok || echo off)">dnsmasq</span><b>$dnsmasq_control_label_e</b><small>logging: $dns_logging</small></div>
+<div class="diag-item"><span class="diag-state $logread_state">logread</span><b>$logread_label_e</b><small>файлы логов ниже</small></div>
+<div class="diag-item"><span class="diag-state $go_state">scan</span><b>$go_label_e</b><small>proxy: $proxy_label_e</small></div>
 </section>
 
 <section class="capture-banner ${capture_state:-idle}" id="captureBanner" data-state="$capture_state" data-start="$capture_time" data-duration="$capture_duration" data-remaining="$capture_remaining">
@@ -754,11 +877,12 @@ cat <<EOF
 
 <section class="utility-grid">
 <div class="source-panel">
-<div class="tool-title">Источники DNS</div>
+<div class="tool-title">Диагностика источников</div>
 <div class="source-grid">
 <div class="source-card">
-<div class="source-row"><b>dnsmasq / logread</b><span class="source-state">local</span></div>
-<div class="muted">Включается на время окна наблюдения, затем выключается обратно.</div>
+<div class="source-row"><b>dnsmasq / logread</b><span class="source-state">$logread_state</span></div>
+<div class="muted">$dnsmasq_control_label_e · $logread_label_e</div>
+<div class="muted">Текущий dnsmasq logging: $dns_logging</div>
 </div>
 <div class="source-card">
 <div class="source-row"><b>Pi-hole API</b><span class="source-state">$pihole_state</span></div>
@@ -766,7 +890,18 @@ cat <<EOF
 <div class="muted">URL: $pihole_url_e · проверка: $pihole_checked_human</div>
 <div style="margin-top:8px"><a class="button" href="?action=pihole_check$source_q">Проверить Pi-hole</a></div>
 </div>
+<div class="source-card">
+<div class="source-row"><b>HTTP/proxy проверки</b><span class="source-state">$go_state</span></div>
+<div class="muted">$go_label_e</div>
+<div class="muted">Proxy: $proxy_label_e</div>
 </div>
+<div class="source-card">
+<div class="source-row"><b>Prometheus</b><span class="source-state">metrics</span></div>
+<div class="muted">Scrape endpoint для контейнера и OpenWrt.</div>
+<div style="margin-top:8px"><a class="button" href="$metrics_path_e">Открыть metrics</a></div>
+</div>
+</div>
+<div class="diag-grid">$diagnostic_logs_html</div>
 </div>
 
 <div class="export-panel">

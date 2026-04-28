@@ -20,6 +20,7 @@ COPY files/usr/bin/sitewatch-capture /usr/bin/sitewatch-capture
 COPY files/usr/bin/sitewatch-scan /usr/bin/sitewatch-scan
 COPY files/usr/bin/sitewatch-check-url /usr/bin/sitewatch-check-url
 COPY files/www/cgi-bin/sitewatch /www/sitewatch/cgi-bin/sitewatch
+COPY files/www/cgi-bin/metrics /www/sitewatch/cgi-bin/metrics
 COPY sitewatch.conf /usr/share/sitewatch/sitewatch.conf
 COPY scripts/docker-entrypoint.sh /usr/local/bin/sitewatch-docker-entrypoint
 
@@ -30,6 +31,7 @@ RUN chmod +x \
 	/usr/bin/sitewatch-scan \
 	/usr/bin/sitewatch-check-url \
 	/www/sitewatch/cgi-bin/sitewatch \
+	/www/sitewatch/cgi-bin/metrics \
 	/usr/local/bin/sitewatch-docker-entrypoint \
 	&& printf '%s\n' '<!doctype html><meta http-equiv="refresh" content="0; url=/cgi-bin/sitewatch"><a href="/cgi-bin/sitewatch">SiteWatch</a>' > /www/sitewatch/index.html
 

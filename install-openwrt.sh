@@ -33,8 +33,9 @@ cp ./files/usr/bin/sitewatch-capture /usr/bin/sitewatch-capture
 cp ./files/usr/bin/sitewatch-scan /usr/bin/sitewatch-scan
 cp ./files/usr/bin/sitewatch-check-url /usr/bin/sitewatch-check-url
 cp ./files/www/cgi-bin/sitewatch /www/sitewatch/cgi-bin/sitewatch
+cp ./files/www/cgi-bin/metrics /www/sitewatch/cgi-bin/metrics
 
-chmod +x /usr/bin/sitewatch-collect /usr/bin/sitewatch-capture /usr/bin/sitewatch-scan /usr/bin/sitewatch-check-url /www/sitewatch/cgi-bin/sitewatch
+chmod +x /usr/bin/sitewatch-collect /usr/bin/sitewatch-capture /usr/bin/sitewatch-scan /usr/bin/sitewatch-check-url /www/sitewatch/cgi-bin/sitewatch /www/sitewatch/cgi-bin/metrics
 touch /etc/sitewatch/seen.tsv /etc/sitewatch/queue.tsv /etc/sitewatch/results.tsv /etc/sitewatch/proxy-domains.txt
 
 if command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/uhttpd ]; then
