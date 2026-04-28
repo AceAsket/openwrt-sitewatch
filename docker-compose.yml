@@ -10,6 +10,8 @@ services:
       - ./logs:/logs:ro
     environment:
       SITEWATCH_PROXY: "http://host.docker.internal:20171"
+      SITEWATCH_DNSMASQ_CONTROL: "0"
+      SITEWATCH_LOG_FILES: "/logs/pihole.log /logs/dnsmasq.log /logs/messages"
       SITEWATCH_PIHOLE_API_ENABLED: "0"
       SITEWATCH_PIHOLE_URL: ""
       SITEWATCH_PIHOLE_PASSWORD: ""

@@ -37,6 +37,7 @@ set_config SITEWATCH_CAPTURE_STOP "/tmp/sitewatch-capture.stop"
 set_config SITEWATCH_LOG_FILES "${SITEWATCH_LOG_FILES:-/logs/pihole.log /logs/dnsmasq.log /logs/messages /var/log/pihole/pihole.log /tmp/log/dnsmasq.log}"
 set_config SITEWATCH_USE_LOGREAD "${SITEWATCH_USE_LOGREAD:-0}"
 set_config SITEWATCH_CLEAR_LOGREAD "${SITEWATCH_CLEAR_LOGREAD:-0}"
+set_config SITEWATCH_DNSMASQ_CONTROL "${SITEWATCH_DNSMASQ_CONTROL:-0}"
 
 for key in \
 	SITEWATCH_VERSION \

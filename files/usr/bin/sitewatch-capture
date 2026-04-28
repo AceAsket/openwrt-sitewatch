@@ -9,6 +9,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_CAPTURE_LOCK:=/tmp/sitewatch-capture.lock}"
 : "${SITEWATCH_CAPTURE_STOP:=/tmp/sitewatch-capture.stop}"
 : "${SITEWATCH_CAPTURE_COLLECT_INTERVAL:=5}"
+: "${SITEWATCH_DNSMASQ_CONTROL:=1}"
 
 duration="${1:-45}"
 case "$duration" in
@@ -31,7 +32,7 @@ if ! mkdir "$SITEWATCH_CAPTURE_LOCK" 2>/dev/null; then
 fi
 
 have_dnsmasq_control=0
-if command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/dnsmasq ]; then
+if [ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/dnsmasq ]; then
 	have_dnsmasq_control=1
 	prev="$(uci -q get dhcp.@dnsmasq[0].logqueries || echo __absent__)"
 else

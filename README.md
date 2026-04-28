@@ -15,6 +15,15 @@ SiteWatch помогает понять, какие домены у конкре
 
 ![SiteWatch dark theme](docs/screenshots/sitewatch-dark.png)
 
+## Два режима работы
+
+SiteWatch рассчитан на два аккуратных варианта установки:
+
+1. **Контейнер отдельно от роутера.** Сервис работает на ПК, сервере или NAS и не управляет OpenWrt напрямую. Он читает примонтированные логи `dnsmasq`/Pi-hole из `/logs` или забирает запросы через удаленный Pi-hole API, а HTTP/proxy-проверки выполняет из контейнера.
+2. **Нативно на OpenWrt.** Сервис работает на роутере, временно включает локальное DNS-логирование `dnsmasq` только на время окна наблюдения, читает локальные логи и при необходимости дополнительно забирает запросы из удаленного Pi-hole API.
+
+За поведение локального `dnsmasq` отвечает `SITEWATCH_DNSMASQ_CONTROL`. Для OpenWrt по умолчанию `1`, для контейнера entrypoint выставляет `0`, чтобы контейнер никогда не пытался включать или перезапускать `dnsmasq`.
+
 ## Что ставить на роутер
 
 Для shell-fallback и Pi-hole API нужны:
@@ -97,12 +106,14 @@ http://localhost:8095/
 
 ```yaml
 SITEWATCH_PROXY: "http://host.docker.internal:20171"
+SITEWATCH_DNSMASQ_CONTROL: "0"
+SITEWATCH_LOG_FILES: "/logs/pihole.log /logs/dnsmasq.log /logs/messages"
 SITEWATCH_PIHOLE_API_ENABLED: "1"
 SITEWATCH_PIHOLE_URL: "http://192.168.1.2:8155"
 SITEWATCH_PIHOLE_PASSWORD: "<password>"
 ```
 
-Если v2rayA работает на роутере, укажи роутер вместо `host.docker.internal`, например `http://192.168.1.1:20171`. Если контейнер нужен только для ручной проверки и Pi-hole API, DNS-логи можно не монтировать.
+Если v2rayA работает на роутере, укажи роутер вместо `host.docker.internal`, например `http://192.168.1.1:20171`. Если контейнер нужен только для ручной проверки и Pi-hole API, DNS-логи можно не монтировать. Если есть только логи без Pi-hole API, оставь `SITEWATCH_PIHOLE_API_ENABLED="0"` и примонтируй нужные файлы в `/logs`.
 
 ## Установка
 
@@ -163,6 +174,7 @@ SITEWATCH_BATCH="12"
 SITEWATCH_TIMEOUT="7"
 SITEWATCH_SLOW_SECONDS="5"
 SITEWATCH_SLOW_RATIO="3"
+SITEWATCH_DNSMASQ_CONTROL="1"
 SITEWATCH_PIHOLE_API_ENABLED="0"
 SITEWATCH_PIHOLE_URL=""
 SITEWATCH_PIHOLE_PASSWORD=""
