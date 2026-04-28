@@ -60,6 +60,13 @@ normalize_run_mode() {
 	esac
 }
 
+normalize_tab() {
+	case "$1" in
+		overview|domains|manual|settings|diagnostics) printf "%s" "$1" ;;
+		*) printf "overview" ;;
+	esac
+}
+
 normalize_container_addr() {
 	value="$(printf "%s" "$1" | sed 's/[[:space:]]//g')"
 	value="${value#http://}"
@@ -405,6 +412,7 @@ print_domain_rows() {
 }
 
 action="$(param action)"
+active_tab="$(normalize_tab "$(safe_token "$(param tab)")")"
 source_filter="$(safe_token "$(param source)")"
 duration="$(safe_token "$(param duration)")"
 manual_url="$(url_decode_light "$(param url)")"
@@ -797,6 +805,18 @@ source_title_e="$(printf "%s" "$source_title" | html_escape)"
 source_filter_e="$(printf "%s" "$source_filter" | html_escape)"
 scan_workers_e="$(printf "%s" "$scan_workers" | html_escape)"
 sitewatch_version_e="$(printf "%s" "$SITEWATCH_VERSION" | html_escape)"
+overview_active=""
+domains_active=""
+manual_active=""
+settings_active=""
+diagnostics_active=""
+case "$active_tab" in
+	domains) domains_active=" active" ;;
+	manual) manual_active=" active" ;;
+	settings) settings_active=" active" ;;
+	diagnostics) diagnostics_active=" active" ;;
+	*) overview_active=" active" ;;
+esac
 manual_url_e="$(printf "%s" "$manual_url" | html_escape)"
 manual_status=""
 manual_status_text=""
@@ -950,14 +970,14 @@ button.button{font:inherit;cursor:pointer}
 </section>
 
 <nav class="tabs" aria-label="Разделы SiteWatch">
-<button class="tab-button active" type="button" data-tab="overview">Обзор</button>
-<button class="tab-button" type="button" data-tab="domains">Домены</button>
-<button class="tab-button" type="button" data-tab="manual">Проверка URL</button>
-<button class="tab-button" type="button" data-tab="settings">Настройки</button>
-<button class="tab-button" type="button" data-tab="diagnostics">Диагностика</button>
+<button class="tab-button$overview_active" type="button" data-tab="overview">Обзор</button>
+<button class="tab-button$domains_active" type="button" data-tab="domains">Домены</button>
+<button class="tab-button$manual_active" type="button" data-tab="manual">Проверка URL</button>
+<button class="tab-button$settings_active" type="button" data-tab="settings">Настройки</button>
+<button class="tab-button$diagnostics_active" type="button" data-tab="diagnostics">Диагностика</button>
 </nav>
 
-<section class="tab-panel active" data-tab-panel="overview">
+<section class="tab-panel$overview_active" data-tab-panel="overview">
 <section class="capture-banner ${capture_state:-idle}" id="captureBanner" data-state="$capture_state" data-start="$capture_time" data-duration="$capture_duration" data-remaining="$capture_remaining">
 <div class="capture-left"><span class="pulse"></span><div><b id="captureTitle">$capture_text</b><div class="muted" id="captureDetail">Новые DNS-запросы подхватываются автоматически во время активного окна.</div></div></div>
 <div class="capture-meta"><span class="timer" id="captureTimer">${capture_remaining:-}</span> <span class="live-tag" id="captureMode">$capture_mode_text</span></div>
@@ -1038,7 +1058,7 @@ button.button{font:inherit;cursor:pointer}
 </div>
 </section>
 
-<section class="tab-panel" data-tab-panel="manual">
+<section class="tab-panel$manual_active" data-tab-panel="manual">
 <section class="manual-panel">
 <div class="tool-title">Ручная проверка URL</div>
 <form method="get" action="" id="manualCheckForm">
@@ -1076,7 +1096,7 @@ cat <<EOF
 </section>
 </section>
 
-<section class="tab-panel" data-tab-panel="diagnostics">
+<section class="tab-panel$diagnostics_active" data-tab-panel="diagnostics">
 <section class="mode-strip">
 <div class="diag-item"><span class="diag-state $mode_state">mode</span><b>$mode_label_e</b><small>$mode_hint_e</small></div>
 <div class="diag-item"><span class="diag-state $([ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && echo ok || echo off)">dnsmasq</span><b>$dnsmasq_control_label_e</b><small>logging: $dns_logging</small></div>
@@ -1112,7 +1132,7 @@ cat <<EOF
 </div>
 </section>
 
-<section class="tab-panel" data-tab-panel="settings">
+<section class="tab-panel$settings_active" data-tab-panel="settings">
 <div class="source-panel">
 <div class="tool-title">Текущие параметры</div>
 <div class="source-grid">
@@ -1145,7 +1165,7 @@ $agent_ingest_input_html
 
 </section>
 
-<section class="tab-panel" data-tab-panel="domains">
+<section class="tab-panel$domains_active" data-tab-panel="domains">
 <nav class="sources">
 <a class="chip" href="?">Все устройства</a>
 EOF
