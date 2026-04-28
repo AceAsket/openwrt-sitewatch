@@ -348,6 +348,9 @@ case "$action" in
 	pihole_check)
 		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
 		;;
+	save_settings)
+		save_config_value SITEWATCH_SCAN_WORKERS "$scan_workers"
+		;;
 	status)
 		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
 		printf "Content-Type: text/plain; charset=utf-8\r\n\r\n"
@@ -724,6 +727,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .utility-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px}.utility-grid .source-panel{margin-bottom:0}.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.export-grid{display:grid;grid-template-columns:1fr;gap:8px}.export-grid select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
 .source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:12px;background:rgba(255,255,255,.35)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
 .manual-panel form{display:grid;grid-template-columns:minmax(260px,1fr) auto auto;gap:10px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:38px;padding:8px 10px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}.manual-result:empty{display:none}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.35)}.manual-metric span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}.manual-dpi{grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:rgba(255,255,255,.25)}.manual-dpi summary{cursor:pointer;font-weight:800;color:var(--muted)}.manual-dpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-loading{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.manual-panel.loading .manual-loading{display:flex}.spinner{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.settings-form{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:12px}.settings-form label{display:grid;gap:5px;color:var(--muted);font-weight:800}.settings-form input{width:110px;border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text);font-weight:800}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 th.sortable{cursor:pointer;user-select:none}.sort-indicator{color:var(--muted);font-size:11px;margin-left:4px}
@@ -742,7 +746,7 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .tab-button.active{background:var(--panel);border-color:var(--line);color:var(--text)}
 :root[data-theme="dark"] .tool,:root[data-theme="dark"] .stat,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .chip,:root[data-theme="dark"] .export-panel,:root[data-theme="dark"] .source-panel,:root[data-theme="dark"] .manual-panel{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.24)}
 :root[data-theme="dark"] .source-card{background:#111821}
-:root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select,:root[data-theme="dark"] .manual-panel input[type="text"],:root[data-theme="dark"] .export-grid select{background:#0f1620;color:var(--text)}
+:root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select,:root[data-theme="dark"] .manual-panel input[type="text"],:root[data-theme="dark"] .export-grid select,:root[data-theme="dark"] .settings-form input{background:#0f1620;color:var(--text)}
 :root[data-theme="dark"] .scan-workers input{background:#0f1620;color:var(--text)}
 :root[data-theme="dark"] .manual-metric,:root[data-theme="dark"] .manual-dpi{background:#111821}
 :root[data-theme="dark"] .chip.active{background:#e7edf5;color:#111821;border-color:#e7edf5}
@@ -947,6 +951,12 @@ cat <<EOF
 <div class="source-card"><b>Pi-hole API</b><div class="muted">$pihole_label_e</div></div>
 <div class="source-card"><b>Prometheus</b><div class="muted">$metrics_path_e</div></div>
 </div>
+<form class="settings-form" method="get" action="">
+<input type="hidden" name="action" value="save_settings">
+<input type="hidden" name="tab" value="settings">
+<label>Потоков распознавания <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
+<button class="button primary" type="submit">Сохранить</button>
+</form>
 </div>
 
 </section>
