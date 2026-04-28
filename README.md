@@ -119,14 +119,45 @@ SITEWATCH_PIHOLE_PASSWORD: "<password>"
 
 Если SiteWatch работает в контейнере, а Pi-hole нет, лучше не читать лог-файлы с роутера по сети. Поставь на OpenWrt только маленький `sitewatch-agent`: он временно включает `dnsmasq logqueries`, читает `logread -f`, парсит DNS-запросы в потоке и отправляет в контейнер уже готовые пары `source/domain`.
 
+Сначала сгенерируй общий токен на Unraid/Linux-хосте:
+
+```sh
+SITEWATCH_TOKEN="$(openssl rand -hex 32)"
+echo "$SITEWATCH_TOKEN"
+```
+
+Если `openssl` недоступен:
+
+```sh
+SITEWATCH_TOKEN="$(head -c 32 /dev/urandom | base64 | tr -d '=+/[:space:]' | cut -c1-48)"
+echo "$SITEWATCH_TOKEN"
+```
+
+Тот же токен нужно указать и в контейнере, и на роутере. Без токена ingest endpoint открыт внутри твоей сети, поэтому для постоянного запуска токен лучше включить.
+
+Пример запуска контейнера:
+
+```sh
+docker run -d \
+  --name sitewatch \
+  --restart unless-stopped \
+  -p 8095:8095 \
+  -v /mnt/user/appdata/sitewatch:/data \
+  -v /mnt/user/appdata/sitewatch/logs:/logs:ro \
+  -e SITEWATCH_DNSMASQ_CONTROL=0 \
+  -e SITEWATCH_PROXY=http://192.168.1.1:20171 \
+  -e SITEWATCH_INGEST_TOKEN="$SITEWATCH_TOKEN" \
+  aceasket/openwrt-sitewatch:dev
+```
+
 На роутере в `/etc/sitewatch/sitewatch.conf`:
 
 ```sh
 SITEWATCH_AGENT_INGEST_URL="http://<container-host>:8095/cgi-bin/sitewatch"
-SITEWATCH_INGEST_TOKEN="<optional-shared-token>"
+SITEWATCH_INGEST_TOKEN="<same-token>"
 ```
 
-В контейнере задай такой же `SITEWATCH_INGEST_TOKEN`, если используешь токен. Запуск короткого окна на роутере:
+После настройки контейнера и роутера запуск короткого окна на роутере:
 
 ```sh
 sitewatch-agent 45
