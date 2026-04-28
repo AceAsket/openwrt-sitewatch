@@ -171,6 +171,25 @@ print_result_domains() {
 	done | sort -u
 }
 
+redirect_clean() {
+	tab="$1"
+	location="/"
+	separator="?"
+	if [ -n "$source_filter" ]; then
+		location="${location}?source=$source_filter"
+		separator="&"
+	fi
+	if [ -n "$tab" ]; then
+		location="${location}${separator}tab=$tab"
+	fi
+	printf "Status: 303 See Other\r\n"
+	printf "Location: %s\r\n" "$location"
+	printf "Cache-Control: no-store\r\n"
+	printf "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+	printf "redirect\n"
+	exit 0
+}
+
 status_label() {
 	case "$1" in
 		blocked) echo "заблокирован" ;;
@@ -412,20 +431,25 @@ case "$action" in
 	capture)
 		"$active_capture_bin" "$duration" >/dev/null 2>&1 &
 		sleep 1
+		redirect_clean overview
 		;;
 	capture_live)
 		"$active_capture_bin" 0 >/dev/null 2>&1 &
 		sleep 1
+		redirect_clean overview
 		;;
 	capture_stop)
 		"$active_capture_bin" stop >/dev/null 2>&1
 		sleep 1
+		redirect_clean overview
 		;;
 	collect)
 		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
+		redirect_clean overview
 		;;
 	pihole_check)
 		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
+		redirect_clean settings
 		;;
 	save_settings)
 		save_config_value SITEWATCH_SCAN_WORKERS "$scan_workers"
@@ -441,6 +465,7 @@ case "$action" in
 			active_capture_bin="$SITEWATCH_AGENT_BIN"
 			active_capture_status="$SITEWATCH_AGENT_STATUS"
 		fi
+		redirect_clean settings
 		;;
 	ingest)
 		if [ -n "$SITEWATCH_INGEST_TOKEN" ] && [ "$ingest_token" != "$SITEWATCH_INGEST_TOKEN" ]; then
@@ -491,6 +516,7 @@ case "$action" in
 			SITEWATCH_SCAN_WORKERS="$scan_workers" SITEWATCH_FORCE_RESCAN=1 "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
 		fi
 		sleep 1
+		redirect_clean overview
 		;;
 	scan_pending)
 		save_config_value SITEWATCH_SCAN_WORKERS "$scan_workers"
@@ -500,6 +526,7 @@ case "$action" in
 			SITEWATCH_SCAN_WORKERS="$scan_workers" "$SITEWATCH_SCAN_BIN" >/dev/null 2>&1 &
 		fi
 		sleep 1
+		redirect_clean overview
 		;;
 	clear_observations)
 		: > "$SITEWATCH_SEEN"
@@ -508,6 +535,7 @@ case "$action" in
 		: > "$SITEWATCH_PROXY_OUT"
 		rm -f "$SITEWATCH_SCAN_STATUS"
 		clear_dns_logs
+		redirect_clean overview
 		;;
 	manual_check)
 		if [ -n "$manual_url" ]; then
