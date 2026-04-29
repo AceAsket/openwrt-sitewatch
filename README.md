@@ -111,6 +111,9 @@ SITEWATCH_LOG_FILES: "/logs/pihole.log /logs/dnsmasq.log /logs/messages"
 SITEWATCH_PIHOLE_API_ENABLED: "1"
 SITEWATCH_PIHOLE_URL: "http://192.168.1.2:8155"
 SITEWATCH_PIHOLE_PASSWORD: "<password>"
+SITEWATCH_PIHOLE_LOOKBACK: "600"
+SITEWATCH_PIHOLE_LIMIT: "1000"
+SITEWATCH_PIHOLE_DISK: "0"
 ```
 
 Если v2rayA работает на роутере, укажи роутер вместо `host.docker.internal`, например `http://192.168.1.1:20171`. Если контейнер нужен только для ручной проверки и Pi-hole API, DNS-логи можно не монтировать. Если есть только логи без Pi-hole API, оставь `SITEWATCH_PIHOLE_API_ENABLED="0"` и примонтируй нужные файлы в `/logs`.
@@ -252,6 +255,7 @@ SITEWATCH_PIHOLE_API_ENABLED="0"
 SITEWATCH_PIHOLE_URL=""
 SITEWATCH_PIHOLE_PASSWORD=""
 SITEWATCH_PIHOLE_LOOKBACK="600"
+SITEWATCH_PIHOLE_LIMIT="1000"
 SITEWATCH_PIHOLE_DISK="0"
 SITEWATCH_EXCLUDE_DOMAINS="connectivitycheck.gstatic.com connectivitycheck.android.com"
 SITEWATCH_CHECK_BASE_DOMAIN="1"
@@ -271,11 +275,12 @@ SITEWATCH_PIHOLE_API_ENABLED="1"
 SITEWATCH_PIHOLE_URL="http://192.168.1.2:8155"
 SITEWATCH_PIHOLE_PASSWORD="<PIHOLE_PASSWORD>"
 SITEWATCH_PIHOLE_LOOKBACK="86400"
+SITEWATCH_PIHOLE_LIMIT="1000"
 SITEWATCH_PIHOLE_DISK="0"
 ```
 
 Пароль лучше хранить только на роутере в `/etc/sitewatch/sitewatch.conf`, не в git.
-По умолчанию SiteWatch читает свежую live-выдачу Pi-hole API. Если нужна именно долговременная база Pi-hole, включи `SITEWATCH_PIHOLE_DISK="1"`, но новые запросы могут появляться там не сразу.
+`SITEWATCH_PIHOLE_URL` можно указывать как корень Pi-hole (`http://host:8155`), так и привычный адрес админки (`http://host:8155/admin/`), SiteWatch сам уберет `/admin`. По умолчанию SiteWatch читает свежую live-выдачу Pi-hole API. Если нужна именно долговременная база Pi-hole, включи `SITEWATCH_PIHOLE_DISK="1"`, но новые запросы могут появляться там не сразу. `SITEWATCH_PIHOLE_LIMIT` задает размер пачки API-запросов; это полезно, когда последние 100 записей заняты локальными `127.0.0.1` запросами Pi-hole.
 В статусе Pi-hole показывается количество реально импортированных DNS-пар `source/domain`, а не число сырых записей API. Запросы от `127.0.0.1` и `::1` игнорируются.
 
 Примеры:

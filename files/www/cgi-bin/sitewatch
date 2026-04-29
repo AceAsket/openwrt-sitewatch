@@ -31,6 +31,9 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_PIHOLE_API_ENABLED:=0}"
 : "${SITEWATCH_PIHOLE_URL:=}"
 : "${SITEWATCH_PIHOLE_PASSWORD:=}"
+: "${SITEWATCH_PIHOLE_LOOKBACK:=600}"
+: "${SITEWATCH_PIHOLE_LIMIT:=1000}"
+: "${SITEWATCH_PIHOLE_DISK:=0}"
 : "${SITEWATCH_PIHOLE_STATUS:=/tmp/sitewatch-pihole.status}"
 : "${SITEWATCH_AGENT_CHECK_STATUS:=/tmp/sitewatch-agent-check.status}"
 
@@ -67,6 +70,23 @@ normalize_retention_days() {
 	printf "%s" "$value"
 }
 
+normalize_int_range() {
+	value="$1"
+	min="$2"
+	max="$3"
+	default="$4"
+	case "$value" in
+		""|*[!0-9]*) value="$default" ;;
+	esac
+	[ "$value" -lt "$min" ] && value="$min"
+	[ "$value" -gt "$max" ] && value="$max"
+	printf "%s" "$value"
+}
+
+normalize_bool() {
+	[ "$1" = "1" ] && printf "1" || printf "0"
+}
+
 normalize_run_mode() {
 	case "$1" in
 		agent) printf "agent" ;;
@@ -88,6 +108,17 @@ normalize_container_addr() {
 	value="${value%%/*}"
 	value="${value%%\?*}"
 	value="${value%%#*}"
+	printf "%s" "$value"
+}
+
+normalize_pihole_url() {
+	value="$(printf "%s" "$1" | sed 's/[[:space:]]//g')"
+	value="${value%%\?*}"
+	value="${value%%#*}"
+	value="${value%/}"
+	case "$value" in
+		*/admin) value="${value%/admin}" ;;
+	esac
 	printf "%s" "$value"
 }
 
@@ -534,6 +565,12 @@ else
 fi
 agent_ingest_url="$(normalize_container_addr "$(url_decode_light "$(param agent_ingest_url)")")"
 settings_token="$(safe_token "$(param ingest_token)")"
+pihole_enabled="$(normalize_bool "$(safe_token "$(param pihole_enabled)")")"
+pihole_url="$(normalize_pihole_url "$(url_decode_light "$(param pihole_url)")")"
+pihole_password="$(url_decode_light "$(param pihole_password)")"
+pihole_lookback="$(normalize_int_range "$(safe_token "$(param pihole_lookback)")" 60 31536000 "$SITEWATCH_PIHOLE_LOOKBACK")"
+pihole_limit="$(normalize_int_range "$(safe_token "$(param pihole_limit)")" 100 10000 "$SITEWATCH_PIHOLE_LIMIT")"
+pihole_disk="$(normalize_bool "$(safe_token "$(param pihole_disk)")")"
 scan_workers="$(normalize_scan_workers "$(safe_token "$(param scan_workers)")")"
 [ -n "$scan_workers" ] || scan_workers="$(normalize_scan_workers "$SITEWATCH_SCAN_WORKERS")"
 [ -n "$scan_workers" ] || scan_workers=4
@@ -588,10 +625,22 @@ case "$action" in
 		save_config_value SITEWATCH_RUN_MODE "$run_mode"
 		save_config_value SITEWATCH_AGENT_INGEST_URL "$agent_ingest_url"
 		save_config_value SITEWATCH_INGEST_TOKEN "$settings_token"
+		save_config_value SITEWATCH_PIHOLE_API_ENABLED "$pihole_enabled"
+		save_config_value SITEWATCH_PIHOLE_URL "$pihole_url"
+		save_config_value SITEWATCH_PIHOLE_PASSWORD "$pihole_password"
+		save_config_value SITEWATCH_PIHOLE_LOOKBACK "$pihole_lookback"
+		save_config_value SITEWATCH_PIHOLE_LIMIT "$pihole_limit"
+		save_config_value SITEWATCH_PIHOLE_DISK "$pihole_disk"
 		SITEWATCH_RUN_MODE="$run_mode"
 		SITEWATCH_RETENTION_DAYS="$retention_days"
 		SITEWATCH_AGENT_INGEST_URL="$agent_ingest_url"
 		SITEWATCH_INGEST_TOKEN="$settings_token"
+		SITEWATCH_PIHOLE_API_ENABLED="$pihole_enabled"
+		SITEWATCH_PIHOLE_URL="$pihole_url"
+		SITEWATCH_PIHOLE_PASSWORD="$pihole_password"
+		SITEWATCH_PIHOLE_LOOKBACK="$pihole_lookback"
+		SITEWATCH_PIHOLE_LIMIT="$pihole_limit"
+		SITEWATCH_PIHOLE_DISK="$pihole_disk"
 		active_capture_bin="$SITEWATCH_CAPTURE_BIN"
 		active_capture_status="$SITEWATCH_CAPTURE_STATUS"
 		if [ "$SITEWATCH_RUN_MODE" = "agent" ]; then
@@ -873,6 +922,16 @@ pihole_label="Pi-hole API выключен"
 [ -n "$SITEWATCH_PIHOLE_URL" ] && pihole_url_label="$SITEWATCH_PIHOLE_URL" || pihole_url_label="не задан"
 pihole_label_e="$(printf "%s" "$pihole_label" | html_escape)"
 pihole_url_e="$(printf "%s" "$pihole_url_label" | html_escape)"
+pihole_form_url_e="$(printf "%s" "$SITEWATCH_PIHOLE_URL" | html_escape)"
+pihole_password_e="$(printf "%s" "$SITEWATCH_PIHOLE_PASSWORD" | html_escape)"
+pihole_lookback_e="$(printf "%s" "$SITEWATCH_PIHOLE_LOOKBACK" | html_escape)"
+pihole_limit_e="$(printf "%s" "$SITEWATCH_PIHOLE_LIMIT" | html_escape)"
+pihole_enabled_selected=""
+pihole_disabled_selected=""
+[ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && pihole_enabled_selected="selected" || pihole_disabled_selected="selected"
+pihole_disk_selected=""
+pihole_live_selected=""
+[ "$SITEWATCH_PIHOLE_DISK" = "1" ] && pihole_disk_selected="selected" || pihole_live_selected="selected"
 
 if [ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/dnsmasq ]; then
 	mode_label="Нативный OpenWrt"
@@ -1371,6 +1430,22 @@ $agent_ingest_input_html
 <label>Ingest token <input type="password" name="ingest_token" value="$ingest_token_e" placeholder="общий токен"></label>
 <label>Потоков распознавания <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
 <label>Хранить дней <input type="number" name="retention_days" min="1" max="365" step="1" value="$retention_days_e"></label>
+<label>Pi-hole API
+<select name="pihole_enabled">
+<option value="0" $pihole_disabled_selected>Выключен</option>
+<option value="1" $pihole_enabled_selected>Включен</option>
+</select>
+</label>
+<label>Pi-hole URL <input type="text" name="pihole_url" value="$pihole_form_url_e" placeholder="http://192.168.1.2:8155"></label>
+<label>Pi-hole пароль <input type="password" name="pihole_password" value="$pihole_password_e" placeholder="пароль веб-интерфейса"></label>
+<label>Pi-hole база
+<select name="pihole_disk">
+<option value="0" $pihole_live_selected>Live</option>
+<option value="1" $pihole_disk_selected>Disk</option>
+</select>
+</label>
+<label>Pi-hole секунд <input type="number" name="pihole_lookback" min="60" max="31536000" step="60" value="$pihole_lookback_e"></label>
+<label>Pi-hole лимит <input type="number" name="pihole_limit" min="100" max="10000" step="100" value="$pihole_limit_e"></label>
 <button class="button primary" type="submit" id="settingsSubmit">Сохранить</button>
 </form>
 <div class="settings-save-status" id="settingsSaveStatus"><span class="spinner"></span><span>Сохранение настроек</span></div>

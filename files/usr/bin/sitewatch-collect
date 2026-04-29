@@ -13,6 +13,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_PIHOLE_URL:=}"
 : "${SITEWATCH_PIHOLE_PASSWORD:=}"
 : "${SITEWATCH_PIHOLE_LOOKBACK:=600}"
+: "${SITEWATCH_PIHOLE_LIMIT:=1000}"
 : "${SITEWATCH_PIHOLE_DISK:=0}"
 : "${SITEWATCH_PIHOLE_STATUS:=/tmp/sitewatch-pihole.status}"
 
@@ -57,11 +58,18 @@ if [ "$SITEWATCH_PIHOLE_API_ENABLED" = "1" ] && [ -n "$SITEWATCH_PIHOLE_URL" ] &
 	auth="/tmp/sitewatch-pihole-auth.$$"
 	queries="/tmp/sitewatch-pihole-queries.$$"
 	parsed="/tmp/sitewatch-pihole-parsed.$$"
+	case "$SITEWATCH_PIHOLE_LOOKBACK" in ""|*[!0-9]*) SITEWATCH_PIHOLE_LOOKBACK=600 ;; esac
+	case "$SITEWATCH_PIHOLE_LIMIT" in ""|*[!0-9]*) SITEWATCH_PIHOLE_LIMIT=1000 ;; esac
+	[ "$SITEWATCH_PIHOLE_LIMIT" -lt 100 ] && SITEWATCH_PIHOLE_LIMIT=100
+	[ "$SITEWATCH_PIHOLE_LIMIT" -gt 10000 ] && SITEWATCH_PIHOLE_LIMIT=10000
 	from_ts="$(($(date +%s) - SITEWATCH_PIHOLE_LOOKBACK))"
 	url="${SITEWATCH_PIHOLE_URL%/}"
-	query_url="$url/api/queries?from=$from_ts"
+	case "$url" in
+		*/admin) url="${url%/admin}" ;;
+	esac
+	query_url="$url/api/queries?from=$from_ts&length=$SITEWATCH_PIHOLE_LIMIT"
 	if [ "$SITEWATCH_PIHOLE_DISK" = "1" ]; then
-		query_url="$url/api/queries?disk=true&from=$from_ts"
+		query_url="$url/api/queries?disk=true&from=$from_ts&length=$SITEWATCH_PIHOLE_LIMIT"
 	fi
 	trap 'rm -f "$tmp" "$tmp.new" "$cookie" "$auth" "$queries" "$parsed"' EXIT
 	password_json="$(printf "%s" "$SITEWATCH_PIHOLE_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')"
@@ -113,7 +121,7 @@ fi
 
 now="$(date +%s)"
 
-awk -v now="$now" '
+awk -v now="$now" -v seen_file="$SITEWATCH_SEEN" '
 	function clean_domain(s) {
 		gsub(/\.$/, "", s);
 		s = tolower(s);
@@ -130,7 +138,7 @@ awk -v now="$now" '
 		return 1;
 	}
 	BEGIN { FS = "\t"; OFS = "\t"; }
-	FNR == NR {
+	FILENAME == seen_file {
 		key = $1 OFS $2;
 		first[key] = $3;
 		last[key] = $4;
