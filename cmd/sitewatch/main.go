@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
@@ -25,6 +26,7 @@ import (
 type config struct {
 	Queue           string
 	Results         string
+	NetResults      string
 	ProxyOut        string
 	Lock            string
 	ScanStatus      string
@@ -41,6 +43,10 @@ type config struct {
 	CheckBaseDomain bool
 	DNSServer       string
 	DoHURL          string
+	ProbeTarget     string
+	ProbePorts      []int
+	ProbeMode       string
+	ReflectorListen string
 }
 
 type measurement struct {
@@ -119,6 +125,10 @@ func main() {
 		err = cmdCheckURL(cfg, os.Args[2:])
 	case "scan":
 		err = cmdScan(cfg)
+	case "probe":
+		err = cmdProbe(cfg, os.Args[2:])
+	case "reflector":
+		err = cmdReflector(cfg, os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -132,6 +142,8 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: sitewatch check-url [--add] <url>")
 	fmt.Fprintln(os.Stderr, "       sitewatch scan")
+	fmt.Fprintln(os.Stderr, "       sitewatch probe [udp|tcp|both] host:port[,port...]")
+	fmt.Fprintln(os.Stderr, "       sitewatch reflector [listen]")
 }
 
 func loadConfig() config {
@@ -148,6 +160,7 @@ func loadConfig() config {
 	return config{
 		Queue:           getStr(values, "SITEWATCH_QUEUE", "/etc/sitewatch/queue.tsv"),
 		Results:         getStr(values, "SITEWATCH_RESULTS", "/etc/sitewatch/results.tsv"),
+		NetResults:      getStr(values, "SITEWATCH_NET_RESULTS", "/etc/sitewatch/net-probes.tsv"),
 		ProxyOut:        getStr(values, "SITEWATCH_PROXY_OUT", "/etc/sitewatch/proxy-domains.txt"),
 		Lock:            getStr(values, "SITEWATCH_LOCK", "/tmp/sitewatch-scan.lock"),
 		ScanStatus:      getStr(values, "SITEWATCH_SCAN_STATUS", "/tmp/sitewatch-scan.status"),
@@ -164,6 +177,10 @@ func loadConfig() config {
 		CheckBaseDomain: getStr(values, "SITEWATCH_CHECK_BASE_DOMAIN", "1") == "1",
 		DNSServer:       getStr(values, "SITEWATCH_DPI_DNS_SERVER", "1.1.1.1"),
 		DoHURL:          getStr(values, "SITEWATCH_DPI_DOH_URL", "https://cloudflare-dns.com/dns-query"),
+		ProbeTarget:     getStr(values, "SITEWATCH_PROBE_TARGET", ""),
+		ProbePorts:      parsePorts(getStr(values, "SITEWATCH_PROBE_PORTS", "3478,443,50000,55000,60000,65000")),
+		ProbeMode:       getStr(values, "SITEWATCH_PROBE_MODE", "both"),
+		ReflectorListen: getStr(values, "SITEWATCH_REFLECTOR_LISTEN", ":8096"),
 	}
 }
 
@@ -211,6 +228,31 @@ func getFloat(values map[string]string, key string, fallback float64) float64 {
 		return fallback
 	}
 	return val
+}
+
+func parsePorts(raw string) []int {
+	seen := map[int]bool{}
+	var ports []int
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		port, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || port < 1 || port > 65535 || seen[port] {
+			continue
+		}
+		seen[port] = true
+		ports = append(ports, port)
+	}
+	sort.Ints(ports)
+	return ports
+}
+
+type netProbeResult struct {
+	Time   int64
+	Mode   string
+	Target string
+	Port   int
+	Status string
+	RTT    float64
+	Detail string
 }
 
 func cmdCheckURL(cfg config, args []string) error {
@@ -400,6 +442,214 @@ func cmdScan(cfg config) error {
 	}
 	writeScanStatus(cfg, "done", now, len(domains), len(domains), "")
 	return nil
+}
+
+func cmdProbe(cfg config, args []string) error {
+	mode := cfg.ProbeMode
+	target := cfg.ProbeTarget
+	ports := append([]int(nil), cfg.ProbePorts...)
+	if len(args) > 0 && (args[0] == "udp" || args[0] == "tcp" || args[0] == "both") {
+		mode = args[0]
+		args = args[1:]
+	}
+	if len(args) > 0 {
+		target = args[0]
+	}
+	if len(args) > 1 {
+		ports = parsePorts(args[1])
+	}
+	host, portFromTarget, err := splitProbeTarget(target)
+	if err != nil {
+		return err
+	}
+	if portFromTarget > 0 {
+		ports = []int{portFromTarget}
+	}
+	if len(ports) == 0 {
+		return errors.New("no probe ports configured")
+	}
+	var results []netProbeResult
+	for _, port := range ports {
+		if mode == "udp" || mode == "both" {
+			results = append(results, probeUDP(cfg, host, port))
+		}
+		if mode == "tcp" || mode == "both" {
+			results = append(results, probeTCP(cfg, host, port))
+		}
+	}
+	if err := appendNetResults(cfg.NetResults, results); err != nil {
+		return err
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(results)
+}
+
+func splitProbeTarget(target string) (string, int, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", 0, errors.New("SITEWATCH_PROBE_TARGET is not configured")
+	}
+	if host, port, err := net.SplitHostPort(target); err == nil {
+		p, _ := strconv.Atoi(port)
+		return host, p, nil
+	}
+	if strings.Count(target, ":") == 0 {
+		return target, 0, nil
+	}
+	return "", 0, fmt.Errorf("invalid probe target %q", target)
+}
+
+func probeUDP(cfg config, host string, port int) netProbeResult {
+	res := netProbeResult{Time: time.Now().Unix(), Mode: "udp", Target: host, Port: port}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	conn, err := net.DialTimeout("udp", addr, cfg.Timeout)
+	if err != nil {
+		res.Status = "connect_failed"
+		res.Detail = err.Error()
+		return res
+	}
+	defer conn.Close()
+	token := make([]byte, 16)
+	if _, err := rand.Read(token); err != nil {
+		copy(token, []byte(strconv.FormatInt(time.Now().UnixNano(), 10)))
+	}
+	start := time.Now()
+	if _, err := conn.Write(append([]byte("sitewatch-udp:"), token...)); err != nil {
+		res.Status = "send_failed"
+		res.Detail = err.Error()
+		return res
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(cfg.Timeout))
+	buf := make([]byte, 128)
+	n, err := conn.Read(buf)
+	res.RTT = secondsSince(start)
+	if err != nil {
+		res.Status = "timeout"
+		res.Detail = err.Error()
+		return res
+	}
+	if !strings.HasPrefix(string(buf[:n]), "sitewatch-udp:") {
+		res.Status = "mismatch"
+		res.Detail = fmt.Sprintf("unexpected reply %d bytes", n)
+		return res
+	}
+	res.Status = "ok"
+	res.Detail = fmt.Sprintf("%d bytes", n)
+	return res
+}
+
+func probeTCP(cfg config, host string, port int) netProbeResult {
+	res := netProbeResult{Time: time.Now().Unix(), Mode: "tcp", Target: host, Port: port}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", addr, cfg.Timeout)
+	res.RTT = secondsSince(start)
+	if err != nil {
+		res.Status = "connect_failed"
+		res.Detail = err.Error()
+		return res
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(cfg.Timeout))
+	if _, err := conn.Write([]byte("sitewatch-tcp\n")); err != nil {
+		res.Status = "send_failed"
+		res.Detail = err.Error()
+		return res
+	}
+	buf := make([]byte, 64)
+	n, err := conn.Read(buf)
+	if err != nil {
+		res.Status = "read_failed"
+		res.Detail = err.Error()
+		return res
+	}
+	if !strings.HasPrefix(string(buf[:n]), "sitewatch-tcp") {
+		res.Status = "mismatch"
+		res.Detail = fmt.Sprintf("unexpected reply %d bytes", n)
+		return res
+	}
+	res.Status = "ok"
+	res.Detail = fmt.Sprintf("%d bytes", n)
+	return res
+}
+
+func secondsSince(start time.Time) float64 {
+	return float64(time.Since(start).Microseconds()) / 1_000_000
+}
+
+func appendNetResults(path string, results []netProbeResult) error {
+	if path == "" || len(results) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	for _, r := range results {
+		if _, err := fmt.Fprintf(file, "%d\t%s\t%s\t%d\t%s\t%.6f\t%s\n", r.Time, r.Mode, r.Target, r.Port, r.Status, r.RTT, strings.ReplaceAll(r.Detail, "\t", " ")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cmdReflector(cfg config, args []string) error {
+	listen := cfg.ReflectorListen
+	if len(args) > 0 && args[0] != "" {
+		listen = args[0]
+	}
+	errCh := make(chan error, 2)
+	go func() { errCh <- serveUDPReflector(listen) }()
+	go func() { errCh <- serveTCPReflector(listen) }()
+	return <-errCh
+}
+
+func serveUDPReflector(listen string) error {
+	addr, err := net.ResolveUDPAddr("udp", listen)
+	if err != nil {
+		return err
+	}
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	buf := make([]byte, 1500)
+	for {
+		n, remote, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			return err
+		}
+		_, _ = conn.WriteToUDP(buf[:n], remote)
+	}
+}
+
+func serveTCPReflector(listen string) error {
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		return err
+	}
+	defer ln.Close()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return err
+		}
+		go func(c net.Conn) {
+			defer c.Close()
+			_ = c.SetDeadline(time.Now().Add(15 * time.Second))
+			buf := make([]byte, 1500)
+			n, err := c.Read(buf)
+			if err == nil && n > 0 {
+				_, _ = c.Write(buf[:n])
+			}
+		}(conn)
+	}
 }
 
 func writeScanStatus(cfg config, state string, started int64, total int, done int, current string) {

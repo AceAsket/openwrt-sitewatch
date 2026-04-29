@@ -1,0 +1,4 @@
+#!/bin/ash
+set -eu
+
+exec /usr/bin/sitewatch probe "$@"

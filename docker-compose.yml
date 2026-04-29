@@ -5,6 +5,8 @@ services:
     container_name: sitewatch
     ports:
       - "8095:8095"
+      - "8096:8096/tcp"
+      - "8096:8096/udp"
     volumes:
       - sitewatch-data:/data
       - ./logs:/logs:ro
@@ -18,6 +20,8 @@ services:
       SITEWATCH_PIHOLE_LOOKBACK: "600"
       SITEWATCH_PIHOLE_LIMIT: "1000"
       SITEWATCH_PIHOLE_DISK: "0"
+      SITEWATCH_PROBE_TARGET: ""
+      SITEWATCH_PROBE_PORTS: "3478,443,50000,55000,60000,65000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

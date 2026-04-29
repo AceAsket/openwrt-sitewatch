@@ -24,6 +24,8 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_AGENT_INGEST_URL:=}"
 : "${SITEWATCH_AGENT_STATUS:=/tmp/sitewatch-agent.status}"
 : "${SITEWATCH_CHECK_URL_BIN:=/usr/bin/sitewatch-check-url}"
+: "${SITEWATCH_NET_PROBE_BIN:=/usr/bin/sitewatch-net-probe}"
+: "${SITEWATCH_FLOW_PROBE_BIN:=/usr/bin/sitewatch-flow-probe}"
 : "${SITEWATCH_SCAN_WORKERS:=4}"
 : "${SITEWATCH_CAPTURE_STATUS:=/tmp/sitewatch-capture.status}"
 : "${SITEWATCH_SCAN_STATUS:=/tmp/sitewatch-scan.status}"
@@ -36,6 +38,11 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_PIHOLE_DISK:=0}"
 : "${SITEWATCH_PIHOLE_STATUS:=/tmp/sitewatch-pihole.status}"
 : "${SITEWATCH_AGENT_CHECK_STATUS:=/tmp/sitewatch-agent-check.status}"
+: "${SITEWATCH_NET_RESULTS:=/etc/sitewatch/net-probes.tsv}"
+: "${SITEWATCH_FLOW_RESULTS:=/etc/sitewatch/flow-probes.tsv}"
+: "${SITEWATCH_PROBE_TARGET:=}"
+: "${SITEWATCH_PROBE_PORTS:=3478,443,50000,55000,60000,65000}"
+: "${SITEWATCH_PROBE_MODE:=both}"
 
 html_escape() {
 	sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
@@ -547,6 +554,32 @@ print_history_rows() {
 	done
 }
 
+print_net_probe_rows() {
+	rows="$(tail -n 20 "$SITEWATCH_NET_RESULTS" 2>/dev/null || true)"
+	if [ -z "$rows" ]; then
+		printf '<tr><td class="empty" colspan="7">Активных UDP/TCP-проверок пока нет.</td></tr>\n'
+		return 0
+	fi
+	printf "%s\n" "$rows" | awk -F '\t' 'NF >= 7 { print }' | tail -n 12 | while IFS="$(printf '\t')" read -r ts mode target port status rtt detail; do
+		ts_h="$(date -d "@$ts" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$ts")"
+		printf '<tr><td class="muted">%s</td><td>%s</td><td class="source">%s</td><td class="metric">%s</td><td><span class="status %s">%s</span></td><td class="metric">%s с</td><td class="muted">%s</td></tr>\n' \
+			"$(printf "%s" "$ts_h" | html_escape)" "$(printf "%s" "$mode" | html_escape)" "$(printf "%s" "$target" | html_escape)" "$(printf "%s" "$port" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$rtt" | html_escape)" "$(printf "%s" "$detail" | html_escape)"
+	done
+}
+
+print_flow_probe_rows() {
+	rows="$(tail -n 20 "$SITEWATCH_FLOW_RESULTS" 2>/dev/null || true)"
+	if [ -z "$rows" ]; then
+		printf '<tr><td class="empty" colspan="9">Пассивных conntrack-наблюдений пока нет.</td></tr>\n'
+		return 0
+	fi
+	printf "%s\n" "$rows" | awk -F '\t' 'NF >= 9 { print }' | tail -n 12 | while IFS="$(printf '\t')" read -r ts mode source target port status packets bytes detail; do
+		ts_h="$(date -d "@$ts" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$ts")"
+		printf '<tr><td class="muted">%s</td><td>%s</td><td class="source">%s</td><td class="source">%s</td><td class="metric">%s</td><td><span class="status %s">%s</span></td><td class="metric">%s</td><td class="metric">%s</td><td class="muted">%s</td></tr>\n' \
+			"$(printf "%s" "$ts_h" | html_escape)" "$(printf "%s" "$mode" | html_escape)" "$(printf "%s" "$source" | html_escape)" "$(printf "%s" "$target" | html_escape)" "$(printf "%s" "$port" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$packets" | html_escape)" "$(printf "%s" "$bytes" | html_escape)" "$(printf "%s" "$detail" | html_escape)"
+	done
+}
+
 action="$(param action)"
 active_tab="$(normalize_tab "$(safe_token "$(param tab)")")"
 source_filter="$(safe_token "$(param source)")"
@@ -571,6 +604,11 @@ pihole_password="$(url_decode_light "$(param pihole_password)")"
 pihole_lookback="$(normalize_int_range "$(safe_token "$(param pihole_lookback)")" 60 31536000 "$SITEWATCH_PIHOLE_LOOKBACK")"
 pihole_limit="$(normalize_int_range "$(safe_token "$(param pihole_limit)")" 100 10000 "$SITEWATCH_PIHOLE_LIMIT")"
 pihole_disk="$(normalize_bool "$(safe_token "$(param pihole_disk)")")"
+probe_target="$(normalize_container_addr "$(url_decode_light "$(param probe_target)")")"
+probe_mode="$(safe_token "$(param probe_mode)")"
+case "$probe_mode" in udp|tcp|both) ;; *) probe_mode="$SITEWATCH_PROBE_MODE" ;; esac
+probe_ports="$(printf "%s" "$(safe_token "$(param probe_ports)")" | sed 's/[^0-9,]//g')"
+[ -n "$probe_ports" ] || probe_ports="$SITEWATCH_PROBE_PORTS"
 scan_workers="$(normalize_scan_workers "$(safe_token "$(param scan_workers)")")"
 [ -n "$scan_workers" ] || scan_workers="$(normalize_scan_workers "$SITEWATCH_SCAN_WORKERS")"
 [ -n "$scan_workers" ] || scan_workers=4
@@ -622,6 +660,15 @@ case "$action" in
 		"$SITEWATCH_COLLECT_BIN" >/dev/null 2>&1
 		redirect_clean settings
 		;;
+	net_probe)
+		[ -n "$probe_target" ] || probe_target="$SITEWATCH_PROBE_TARGET"
+		"$SITEWATCH_NET_PROBE_BIN" "$probe_mode" "$probe_target" "$probe_ports" >/dev/null 2>&1 || true
+		redirect_clean diagnostics
+		;;
+	flow_probe)
+		"$SITEWATCH_FLOW_PROBE_BIN" >/dev/null 2>&1 || true
+		redirect_clean diagnostics
+		;;
 	save_settings)
 		save_config_value SITEWATCH_SCAN_WORKERS "$scan_workers"
 		save_config_value SITEWATCH_RETENTION_DAYS "$retention_days"
@@ -634,6 +681,9 @@ case "$action" in
 		save_config_value SITEWATCH_PIHOLE_LOOKBACK "$pihole_lookback"
 		save_config_value SITEWATCH_PIHOLE_LIMIT "$pihole_limit"
 		save_config_value SITEWATCH_PIHOLE_DISK "$pihole_disk"
+		save_config_value SITEWATCH_PROBE_TARGET "$probe_target"
+		save_config_value SITEWATCH_PROBE_MODE "$probe_mode"
+		save_config_value SITEWATCH_PROBE_PORTS "$probe_ports"
 		SITEWATCH_RUN_MODE="$run_mode"
 		SITEWATCH_RETENTION_DAYS="$retention_days"
 		SITEWATCH_AGENT_INGEST_URL="$agent_ingest_url"
@@ -644,6 +694,9 @@ case "$action" in
 		SITEWATCH_PIHOLE_LOOKBACK="$pihole_lookback"
 		SITEWATCH_PIHOLE_LIMIT="$pihole_limit"
 		SITEWATCH_PIHOLE_DISK="$pihole_disk"
+		SITEWATCH_PROBE_TARGET="$probe_target"
+		SITEWATCH_PROBE_MODE="$probe_mode"
+		SITEWATCH_PROBE_PORTS="$probe_ports"
 		active_capture_bin="$SITEWATCH_CAPTURE_BIN"
 		active_capture_status="$SITEWATCH_CAPTURE_STATUS"
 		if [ "$SITEWATCH_RUN_MODE" = "agent" ]; then
@@ -935,6 +988,16 @@ pihole_disabled_selected=""
 pihole_disk_selected=""
 pihole_live_selected=""
 [ "$SITEWATCH_PIHOLE_DISK" = "1" ] && pihole_disk_selected="selected" || pihole_live_selected="selected"
+probe_target_e="$(printf "%s" "$SITEWATCH_PROBE_TARGET" | html_escape)"
+probe_ports_e="$(printf "%s" "$SITEWATCH_PROBE_PORTS" | html_escape)"
+probe_udp_selected=""
+probe_tcp_selected=""
+probe_both_selected=""
+case "$SITEWATCH_PROBE_MODE" in
+	udp) probe_udp_selected="selected" ;;
+	tcp) probe_tcp_selected="selected" ;;
+	*) probe_both_selected="selected" ;;
+esac
 body_mode_class=""
 [ "$SITEWATCH_RUN_MODE" = "agent" ] && body_mode_class="mode-agent"
 
@@ -1404,6 +1467,42 @@ cat <<EOF
 </div>
 </div>
 <div class="diag-grid">$diagnostic_logs_html</div>
+</div>
+<div class="source-panel">
+<div class="tool-title">UDP/TCP детект</div>
+<form class="settings-form" method="get" action="">
+<input type="hidden" name="action" value="net_probe">
+<input type="hidden" name="tab" value="diagnostics">
+<label>Reflector host <input type="text" name="probe_target" value="$probe_target_e" placeholder="203.0.113.10"></label>
+<label>Режим
+<select name="probe_mode">
+<option value="both" $probe_both_selected>UDP + TCP</option>
+<option value="udp" $probe_udp_selected>UDP</option>
+<option value="tcp" $probe_tcp_selected>TCP</option>
+</select>
+</label>
+<label>Порты <input type="text" name="probe_ports" value="$probe_ports_e" placeholder="3478,443,50000,55000,60000,65000"></label>
+<button class="button primary" type="submit">Активная проверка</button>
+<a class="button" href="?action=flow_probe&tab=diagnostics">Пассивный conntrack</a>
+</form>
+<div class="utility-grid" style="margin-top:12px">
+<div class="source-panel">
+<div class="tool-title">Активные проверки</div>
+<table><thead><tr><th>Время</th><th>Режим</th><th>Цель</th><th>Порт</th><th>Статус</th><th>RTT</th><th>Детали</th></tr></thead><tbody>
+EOF
+print_net_probe_rows
+cat <<EOF
+</tbody></table>
+</div>
+<div class="source-panel">
+<div class="tool-title">Пассивный conntrack</div>
+<table><thead><tr><th>Время</th><th>Режим</th><th>Источник</th><th>Цель</th><th>Порт</th><th>Статус</th><th>Пакетов</th><th>Байт</th><th>Детали</th></tr></thead><tbody>
+EOF
+print_flow_probe_rows
+cat <<EOF
+</tbody></table>
+</div>
+</div>
 </div>
 </section>
 

@@ -30,6 +30,8 @@ set_config SITEWATCH_USE_GO "1"
 set_config SITEWATCH_SEEN "$DATA_DIR/seen.tsv"
 set_config SITEWATCH_QUEUE "$DATA_DIR/queue.tsv"
 set_config SITEWATCH_RESULTS "$DATA_DIR/results.tsv"
+set_config SITEWATCH_NET_RESULTS "$DATA_DIR/net-probes.tsv"
+set_config SITEWATCH_FLOW_RESULTS "$DATA_DIR/flow-probes.tsv"
 set_config SITEWATCH_PROXY_OUT "$DATA_DIR/proxy-domains.txt"
 set_config SITEWATCH_AGENTS "$DATA_DIR/agents.tsv"
 set_config SITEWATCH_HISTORY "$DATA_DIR/history.tsv"
@@ -63,14 +65,20 @@ for key in \
 	SITEWATCH_EXCLUDE_DOMAINS \
 	SITEWATCH_CHECK_BASE_DOMAIN \
 	SITEWATCH_DPI_DNS_SERVER \
-	SITEWATCH_DPI_DOH_URL
+	SITEWATCH_DPI_DOH_URL \
+	SITEWATCH_PROBE_TARGET \
+	SITEWATCH_PROBE_PORTS \
+	SITEWATCH_PROBE_MODE \
+	SITEWATCH_REFLECTOR_LISTEN \
+	SITEWATCH_FLOW_UDP_PORTS \
+	SITEWATCH_FLOW_TCP_PORTS
 do
 	eval "value=\${$key:-}"
 	[ -n "$value" ] && set_config "$key" "$value"
 done
 
 cp "$DATA_CONF" "$CONF"
-touch "$DATA_DIR/seen.tsv" "$DATA_DIR/queue.tsv" "$DATA_DIR/results.tsv" "$DATA_DIR/proxy-domains.txt" "$DATA_DIR/agents.tsv" "$DATA_DIR/history.tsv"
+touch "$DATA_DIR/seen.tsv" "$DATA_DIR/queue.tsv" "$DATA_DIR/results.tsv" "$DATA_DIR/proxy-domains.txt" "$DATA_DIR/agents.tsv" "$DATA_DIR/history.tsv" "$DATA_DIR/net-probes.tsv" "$DATA_DIR/flow-probes.tsv"
 ash -n "$CONF"
 
 exec "$@"
