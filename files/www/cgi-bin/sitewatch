@@ -899,8 +899,13 @@ case "$SITEWATCH_RUN_MODE" in
 		run_mode_hint="Окно наблюдения запускает sitewatch-agent и отправляет DNS-события в контейнер"
 		;;
 	*)
-		run_mode_label="Нативный роутер"
-		run_mode_hint="Окно наблюдения собирает DNS-запросы и результаты локально на роутере"
+		if [ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ]; then
+			run_mode_label="Нативный роутер"
+			run_mode_hint="Окно наблюдения собирает DNS-запросы и результаты локально на роутере"
+		else
+			run_mode_label="Контейнер"
+			run_mode_hint="Сервис работает как UI, хранилище и сканер; DNS-события приходят из логов, Pi-hole или роутерного агента"
+		fi
 		;;
 esac
 [ -n "$SITEWATCH_AGENT_INGEST_URL" ] && agent_ingest_url_label="$SITEWATCH_AGENT_INGEST_URL" || agent_ingest_url_label="не задан"
@@ -920,6 +925,9 @@ ingest_token_e="$(printf "%s" "$SITEWATCH_INGEST_TOKEN" | html_escape)"
 run_mode_native_selected=""
 run_mode_agent_selected=""
 [ "$SITEWATCH_RUN_MODE" = "agent" ] && run_mode_agent_selected="selected" || run_mode_native_selected="selected"
+run_mode_native_option="Нативный роутер"
+[ "$SITEWATCH_DNSMASQ_CONTROL" != "1" ] && run_mode_native_option="Контейнер / локальный сбор"
+run_mode_native_option_e="$(printf "%s" "$run_mode_native_option" | html_escape)"
 agent_ingest_card_html=""
 agent_ingest_input_html=""
 agent_check_html=""
@@ -1355,7 +1363,7 @@ $agent_ingest_card_html
 <input type="hidden" name="tab" value="settings">
 <label>Режим
 <select name="run_mode">
-<option value="native" $run_mode_native_selected>Нативный роутер</option>
+<option value="native" $run_mode_native_selected>$run_mode_native_option_e</option>
 <option value="agent" $run_mode_agent_selected>Агент в контейнер</option>
 </select>
 </label>
