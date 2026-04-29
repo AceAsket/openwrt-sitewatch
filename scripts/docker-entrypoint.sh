@@ -31,6 +31,8 @@ set_config SITEWATCH_SEEN "$DATA_DIR/seen.tsv"
 set_config SITEWATCH_QUEUE "$DATA_DIR/queue.tsv"
 set_config SITEWATCH_RESULTS "$DATA_DIR/results.tsv"
 set_config SITEWATCH_PROXY_OUT "$DATA_DIR/proxy-domains.txt"
+set_config SITEWATCH_AGENTS "$DATA_DIR/agents.tsv"
+set_config SITEWATCH_HISTORY "$DATA_DIR/history.tsv"
 set_config SITEWATCH_CAPTURE_STATUS "/tmp/sitewatch-capture.status"
 set_config SITEWATCH_SCAN_STATUS "/tmp/sitewatch-scan.status"
 set_config SITEWATCH_CAPTURE_STOP "/tmp/sitewatch-capture.stop"
@@ -44,6 +46,7 @@ for key in \
 	SITEWATCH_PROXY \
 	SITEWATCH_BATCH \
 	SITEWATCH_SCAN_WORKERS \
+	SITEWATCH_RETENTION_DAYS \
 	SITEWATCH_TIMEOUT \
 	SITEWATCH_MIN_RESCAN \
 	SITEWATCH_SLOW_SECONDS \
@@ -66,7 +69,7 @@ do
 done
 
 cp "$DATA_CONF" "$CONF"
-touch "$DATA_DIR/seen.tsv" "$DATA_DIR/queue.tsv" "$DATA_DIR/results.tsv" "$DATA_DIR/proxy-domains.txt"
+touch "$DATA_DIR/seen.tsv" "$DATA_DIR/queue.tsv" "$DATA_DIR/results.tsv" "$DATA_DIR/proxy-domains.txt" "$DATA_DIR/agents.tsv" "$DATA_DIR/history.tsv"
 ash -n "$CONF"
 
 exec "$@"

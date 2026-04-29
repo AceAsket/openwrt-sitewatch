@@ -7,6 +7,9 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_SEEN:=/etc/sitewatch/seen.tsv}"
 : "${SITEWATCH_RESULTS:=/etc/sitewatch/results.tsv}"
 : "${SITEWATCH_PROXY_OUT:=/etc/sitewatch/proxy-domains.txt}"
+: "${SITEWATCH_AGENTS:=/etc/sitewatch/agents.tsv}"
+: "${SITEWATCH_HISTORY:=/etc/sitewatch/history.tsv}"
+: "${SITEWATCH_RETENTION_DAYS:=30}"
 : "${SITEWATCH_LOG_FILES:=/var/log/pihole/pihole.log /tmp/log/dnsmasq.log /var/log/messages}"
 : "${SITEWATCH_USE_LOGREAD:=1}"
 : "${SITEWATCH_CLEAR_LOGREAD:=1}"
@@ -29,6 +32,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_PIHOLE_URL:=}"
 : "${SITEWATCH_PIHOLE_PASSWORD:=}"
 : "${SITEWATCH_PIHOLE_STATUS:=/tmp/sitewatch-pihole.status}"
+: "${SITEWATCH_AGENT_CHECK_STATUS:=/tmp/sitewatch-agent-check.status}"
 
 html_escape() {
 	sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
@@ -50,6 +54,16 @@ normalize_scan_workers() {
 	esac
 	[ "$value" -lt 1 ] && value=1
 	[ "$value" -gt 16 ] && value=16
+	printf "%s" "$value"
+}
+
+normalize_retention_days() {
+	value="$1"
+	case "$value" in
+		""|*[!0-9]*) return 1 ;;
+	esac
+	[ "$value" -lt 1 ] && value=1
+	[ "$value" -gt 365 ] && value=365
 	printf "%s" "$value"
 }
 
@@ -107,6 +121,19 @@ clear_dns_logs() {
 			/etc/init.d/log restart >/dev/null 2>&1 || true
 		fi
 	fi
+}
+
+apply_retention() {
+	days="$(normalize_retention_days "$SITEWATCH_RETENTION_DAYS" 2>/dev/null || echo 30)"
+	cutoff=$(( $(date +%s) - days * 86400 ))
+	for item in "$SITEWATCH_SEEN:4" "$SITEWATCH_RESULTS:9" "$SITEWATCH_AGENTS:3" "$SITEWATCH_HISTORY:1"; do
+		file="${item%%:*}"
+		field="${item#*:}"
+		[ -f "$file" ] || continue
+		tmp="/tmp/sitewatch-retention.$$"
+		awk -F '\t' -v cutoff="$cutoff" -v field="$field" 'BEGIN{OFS=FS} ($field == "" || $field >= cutoff) { print }' "$file" > "$tmp" && mv "$tmp" "$file"
+		rm -f "$tmp"
+	done
 }
 
 url_decode_light() {
@@ -263,6 +290,45 @@ valid_ingest_domain() {
 	}'
 }
 
+update_agent_seen() {
+	source="$1"
+	event_ts="$2"
+	[ -n "$source" ] || return 0
+	case "$event_ts" in ""|*[!0-9]*) event_ts="$(date +%s)" ;; esac
+	mkdir -p "$(dirname "$SITEWATCH_AGENTS")"
+	touch "$SITEWATCH_AGENTS"
+	tmp="/tmp/sitewatch-agents.$$"
+	awk -F '\t' -v source="$source" -v now="$event_ts" '
+		BEGIN { OFS = "\t" }
+		$1 == source {
+			if ($2 == "" || $2 == "0") $2 = now;
+			$3 = now;
+			$4 = $4 + 1;
+			done = 1;
+			print;
+			next;
+		}
+		{ print }
+		END {
+			if (!done) print source, now, now, 1;
+		}
+	' "$SITEWATCH_AGENTS" > "$tmp" && mv "$tmp" "$SITEWATCH_AGENTS"
+	rm -f "$tmp"
+}
+
+history_event() {
+	event="$1"
+	duration_value="$2"
+	now="$(date +%s)"
+	seen_count="$(awk -F '\t' 'END { print NR + 0 }' "$SITEWATCH_SEEN" 2>/dev/null)"
+	results_count="$(awk -F '\t' 'END { print NR + 0 }' "$SITEWATCH_RESULTS" 2>/dev/null)"
+	proxy_count="0"
+	[ -f "$SITEWATCH_PROXY_OUT" ] && proxy_count="$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
+	pending_count="$(awk -F '\t' 'FNR == NR { result[$1] = 1; next } !result[$2] && !seen[$2]++ { n++ } END { print n + 0 }' "$SITEWATCH_RESULTS" "$SITEWATCH_SEEN" 2>/dev/null)"
+	mkdir -p "$(dirname "$SITEWATCH_HISTORY")"
+	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$now" "$event" "$duration_value" "$SITEWATCH_RUN_MODE" "${source_filter:-}" "${seen_count:-0}" "${results_count:-0}" "${proxy_count:-0}" "${pending_count:-0}" >> "$SITEWATCH_HISTORY"
+}
+
 ingest_event() {
 	source="$1"
 	domain="$2"
@@ -296,6 +362,7 @@ ingest_event() {
 			if (!done) print source, domain, now, now, 1;
 		}
 	' "$SITEWATCH_SEEN" > "$tmp" && mv "$tmp" "$SITEWATCH_SEEN" && cp "$SITEWATCH_SEEN" "$SITEWATCH_QUEUE"
+	update_agent_seen "$source" "$event_ts"
 	rm -f "$tmp"
 	rmdir "$lock" 2>/dev/null || true
 	return 0
@@ -411,6 +478,44 @@ print_domain_rows() {
 	fi
 }
 
+print_agent_rows() {
+	[ -f "$SITEWATCH_AGENTS" ] || {
+		printf '<tr><td class="empty" colspan="4">Агенты еще не отправляли DNS-события.</td></tr>\n'
+		return 0
+	}
+	rows="$(sort -t "	" -k3,3nr "$SITEWATCH_AGENTS" 2>/dev/null | head -n 12)"
+	if [ -z "$rows" ]; then
+		printf '<tr><td class="empty" colspan="4">Агенты еще не отправляли DNS-события.</td></tr>\n'
+		return 0
+	fi
+	printf "%s\n" "$rows" | while IFS="$(printf '\t')" read -r agent first last count; do
+		[ -n "$agent" ] || continue
+		agent_e="$(printf "%s" "$agent" | html_escape)"
+		first_h="$(date -d "@$first" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$first")"
+		last_h="$(date -d "@$last" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last")"
+		printf '<tr><td class="source">%s</td><td class="muted">%s</td><td class="muted">%s</td><td class="metric">%s</td></tr>\n' "$agent_e" "$first_h" "$last_h" "$count"
+	done
+}
+
+print_history_rows() {
+	[ -f "$SITEWATCH_HISTORY" ] || {
+		printf '<tr><td class="empty" colspan="8">История запусков пока пустая.</td></tr>\n'
+		return 0
+	}
+	rows="$(sort -t "	" -k1,1nr "$SITEWATCH_HISTORY" 2>/dev/null | head -n 12)"
+	if [ -z "$rows" ]; then
+		printf '<tr><td class="empty" colspan="8">История запусков пока пустая.</td></tr>\n'
+		return 0
+	fi
+	printf "%s\n" "$rows" | while IFS="$(printf '\t')" read -r ts event duration_value mode source seen_count results_count proxy_count pending_count; do
+		ts_h="$(date -d "@$ts" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$ts")"
+		event_e="$(printf "%s" "$event" | html_escape)"
+		mode_e="$(printf "%s" "$mode" | html_escape)"
+		source_e="$(printf "%s" "${source:-Все}" | html_escape)"
+		printf '<tr><td class="muted">%s</td><td>%s</td><td class="metric">%s</td><td>%s</td><td class="source">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="metric">%s</td></tr>\n' "$ts_h" "$event_e" "$duration_value" "$mode_e" "$source_e" "$seen_count" "$results_count" "$proxy_count"
+	done
+}
+
 action="$(param action)"
 active_tab="$(normalize_tab "$(safe_token "$(param tab)")")"
 source_filter="$(safe_token "$(param source)")"
@@ -432,7 +537,11 @@ settings_token="$(safe_token "$(param ingest_token)")"
 scan_workers="$(normalize_scan_workers "$(safe_token "$(param scan_workers)")")"
 [ -n "$scan_workers" ] || scan_workers="$(normalize_scan_workers "$SITEWATCH_SCAN_WORKERS")"
 [ -n "$scan_workers" ] || scan_workers=4
+retention_days="$(normalize_retention_days "$(safe_token "$(param retention_days)")")"
+[ -n "$retention_days" ] || retention_days="$(normalize_retention_days "$SITEWATCH_RETENTION_DAYS")"
+[ -n "$retention_days" ] || retention_days=30
 SITEWATCH_SCAN_WORKERS="$scan_workers"
+SITEWATCH_RETENTION_DAYS="$retention_days"
 SITEWATCH_RUN_MODE="$(normalize_run_mode "$SITEWATCH_RUN_MODE")"
 SITEWATCH_AGENT_INGEST_URL="$(normalize_container_addr "$SITEWATCH_AGENT_INGEST_URL")"
 active_capture_bin="$SITEWATCH_CAPTURE_BIN"
@@ -449,16 +558,19 @@ manual_result=""
 case "$action" in
 	capture)
 		"$active_capture_bin" "$duration" >/dev/null 2>&1 &
+		history_event capture "$duration"
 		sleep 1
 		redirect_clean overview
 		;;
 	capture_live)
 		"$active_capture_bin" 0 >/dev/null 2>&1 &
+		history_event live 0
 		sleep 1
 		redirect_clean overview
 		;;
 	capture_stop)
 		"$active_capture_bin" stop >/dev/null 2>&1
+		history_event stop 0
 		sleep 1
 		redirect_clean overview
 		;;
@@ -472,10 +584,12 @@ case "$action" in
 		;;
 	save_settings)
 		save_config_value SITEWATCH_SCAN_WORKERS "$scan_workers"
+		save_config_value SITEWATCH_RETENTION_DAYS "$retention_days"
 		save_config_value SITEWATCH_RUN_MODE "$run_mode"
 		save_config_value SITEWATCH_AGENT_INGEST_URL "$agent_ingest_url"
 		save_config_value SITEWATCH_INGEST_TOKEN "$settings_token"
 		SITEWATCH_RUN_MODE="$run_mode"
+		SITEWATCH_RETENTION_DAYS="$retention_days"
 		SITEWATCH_AGENT_INGEST_URL="$agent_ingest_url"
 		SITEWATCH_INGEST_TOKEN="$settings_token"
 		active_capture_bin="$SITEWATCH_CAPTURE_BIN"
@@ -485,6 +599,30 @@ case "$action" in
 			active_capture_status="$SITEWATCH_AGENT_STATUS"
 		fi
 		redirect_clean settings
+		;;
+	agent_check)
+		now="$(date +%s)"
+		if [ -z "$SITEWATCH_AGENT_INGEST_URL" ]; then
+			printf "not_configured\t%s\t%s\n" "no_container_address" "$now" > "$SITEWATCH_AGENT_CHECK_STATUS"
+		else
+			check_url="http://${SITEWATCH_AGENT_INGEST_URL}/cgi-bin/sitewatch?action=ingest_ping"
+			[ -n "$SITEWATCH_INGEST_TOKEN" ] && check_url="${check_url}&token=${SITEWATCH_INGEST_TOKEN}"
+			if command -v wget >/dev/null 2>&1 && wget -q -T 5 -O - "$check_url" 2>/dev/null | grep -q '^ok'; then
+				printf "ok\t%s\t%s\n" "$SITEWATCH_AGENT_INGEST_URL" "$now" > "$SITEWATCH_AGENT_CHECK_STATUS"
+			else
+				printf "failed\t%s\t%s\n" "$SITEWATCH_AGENT_INGEST_URL" "$now" > "$SITEWATCH_AGENT_CHECK_STATUS"
+			fi
+		fi
+		redirect_clean settings
+		;;
+	ingest_ping)
+		if [ -n "$SITEWATCH_INGEST_TOKEN" ] && [ "$ingest_token" != "$SITEWATCH_INGEST_TOKEN" ]; then
+			printf "Status: 403 Forbidden\r\n"
+			printf "Content-Type: text/plain; charset=utf-8\r\n\r\nforbidden\n"
+			exit 0
+		fi
+		printf "Content-Type: text/plain; charset=utf-8\r\n\r\nok\n"
+		exit 0
 		;;
 	ingest)
 		if [ -n "$SITEWATCH_INGEST_TOKEN" ] && [ "$ingest_token" != "$SITEWATCH_INGEST_TOKEN" ]; then
@@ -553,6 +691,7 @@ case "$action" in
 		: > "$SITEWATCH_RESULTS"
 		: > "$SITEWATCH_PROXY_OUT"
 		rm -f "$SITEWATCH_SCAN_STATUS"
+		: > "$SITEWATCH_HISTORY"
 		clear_dns_logs
 		redirect_clean overview
 		;;
@@ -627,6 +766,8 @@ case "$action" in
 		exit 0
 		;;
 esac
+
+apply_retention
 
 filter_awk='1'
 [ -n "$source_filter" ] && filter_awk='$2 == source_filter'
@@ -781,9 +922,38 @@ run_mode_agent_selected=""
 [ "$SITEWATCH_RUN_MODE" = "agent" ] && run_mode_agent_selected="selected" || run_mode_native_selected="selected"
 agent_ingest_card_html=""
 agent_ingest_input_html=""
+agent_check_html=""
 if [ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ]; then
 	agent_ingest_card_html="<div class=\"source-card\"><b>Ingest контейнера</b><div class=\"muted\">$agent_ingest_url_label_e</div></div>"
 	agent_ingest_input_html="<label>Адрес контейнера <input type=\"text\" name=\"agent_ingest_url\" value=\"$agent_ingest_url_e\" placeholder=\"192.168.1.10:8095\"></label>"
+	agent_check_raw="$(cat "$SITEWATCH_AGENT_CHECK_STATUS" 2>/dev/null || true)"
+	agent_check_state="$(printf "%s" "$agent_check_raw" | awk -F '\t' '{print $1}')"
+	agent_check_target="$(printf "%s" "$agent_check_raw" | awk -F '\t' '{print $2}')"
+	agent_check_ts="$(printf "%s" "$agent_check_raw" | awk -F '\t' '{print $3}')"
+	[ -n "$agent_check_ts" ] && agent_check_when="$(date -d "@$agent_check_ts" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$agent_check_ts")" || agent_check_when="не проверялось"
+	case "$agent_check_state" in
+		ok) agent_check_label="связь работает"; agent_check_state_class="ok" ;;
+		failed) agent_check_label="нет связи"; agent_check_state_class="warn" ;;
+		not_configured) agent_check_label="адрес не задан"; agent_check_state_class="off" ;;
+		*) agent_check_label="не проверялось"; agent_check_state_class="off" ;;
+	esac
+	agent_check_label_e="$(printf "%s" "$agent_check_label" | html_escape)"
+	agent_check_target_e="$(printf "%s" "$agent_check_target" | html_escape)"
+	agent_check_html="<div class=\"source-card\"><div class=\"source-row\"><b>Связь с контейнером</b><span class=\"source-state $agent_check_state_class\">$agent_check_label_e</span></div><div class=\"muted\">$agent_check_target_e · $agent_check_when</div><div style=\"margin-top:8px\"><a class=\"button\" href=\"?action=agent_check&tab=settings\">Проверить связь</a></div></div>"
+fi
+retention_days_e="$(printf "%s" "$retention_days" | html_escape)"
+token_warning_html=""
+if [ -z "$SITEWATCH_INGEST_TOKEN" ]; then
+	token_warning_html="<div class=\"notice warn\"><b>Ingest token не задан</b><span>Внутри локальной сети endpoint приема DNS-событий открыт без проверки токена.</span></div>"
+fi
+container_addr="${HTTP_HOST:-192.168.1.10:8095}"
+container_addr="${container_addr%%/*}"
+container_addr_e="$(printf "%s" "$container_addr" | html_escape)"
+router_setup_html=""
+if [ "$SITEWATCH_DNSMASQ_CONTROL" != "1" ]; then
+	router_setup="$(printf 'SITEWATCH_RUN_MODE=\"agent\"\nSITEWATCH_AGENT_INGEST_URL=\"%s\"\nSITEWATCH_INGEST_TOKEN=\"%s\"' "$container_addr" "$SITEWATCH_INGEST_TOKEN")"
+	router_setup_e="$(printf "%s" "$router_setup" | html_escape)"
+	router_setup_html="<div class=\"source-panel\"><div class=\"tool-title\">Настройка агента на роутере</div><pre class=\"codebox\">$router_setup_e</pre></div>"
 fi
 metrics_path="/cgi-bin/metrics"
 metrics_path_e="$(printf "%s" "$metrics_path" | html_escape)"
@@ -917,7 +1087,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .scan-progress{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:10px 12px;margin:-6px 0 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}.scan-progress[data-state=""]{display:none}.scan-text{font-weight:800}.scan-current{color:var(--muted);font-size:13px;word-break:break-word}.bar{height:6px;background:#e7edf5;border-radius:999px;overflow:hidden;grid-column:1/-1}.bar span{display:block;height:100%;width:0;background:var(--blue);transition:width .25s ease}
 .sources{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--text);padding:6px 10px;text-decoration:none;font-weight:650}.chip.active{background:#17202c;color:#fff;border-color:#17202c}.chip small{color:var(--muted);margin-left:6px}.chip.active small{color:#d7dde6}
 .utility-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px}.utility-grid .source-panel{margin-bottom:0}.export-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.export-grid{display:grid;grid-template-columns:1fr;gap:8px}.export-grid select{border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text)}
-.source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:12px;background:rgba(255,255,255,.35)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}
+.source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:12px;background:rgba(255,255,255,.35)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}.source-state.ok{color:var(--green)}.source-state.warn{color:var(--amber)}.source-state.off{color:var(--muted)}.notice{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:grid;gap:3px}.notice.warn{border-color:#f0d27a;background:#fff7df;color:#6f4a00}.codebox{border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.35);padding:12px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .manual-panel form{display:grid;grid-template-columns:minmax(260px,1fr) auto auto;gap:10px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:38px;padding:8px 10px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}.manual-result:empty{display:none}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.35)}.manual-metric span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}.manual-dpi{grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:rgba(255,255,255,.25)}.manual-dpi summary{cursor:pointer;font-weight:800;color:var(--muted)}.manual-dpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-loading{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.manual-panel.loading .manual-loading{display:flex}.spinner{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .settings-form{display:grid;grid-template-columns:160px minmax(260px,1fr) minmax(220px,1fr) 110px auto;gap:8px;align-items:end;margin-top:12px}.settings-form label{display:grid;gap:5px;color:var(--muted);font-weight:800}.settings-form input,.settings-form select{width:100%;border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text);font-weight:800}.settings-save-status{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.source-panel.saving .settings-save-status{display:flex}.source-panel.saving .settings-form{opacity:.72;pointer-events:none}.button.saving{position:relative}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
@@ -941,6 +1111,7 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .tool input,:root[data-theme="dark"] .tool select,:root[data-theme="dark"] .manual-panel input[type="text"],:root[data-theme="dark"] .export-grid select,:root[data-theme="dark"] .settings-form input,:root[data-theme="dark"] .settings-form select{background:#0f1620;color:var(--text)}
 :root[data-theme="dark"] .scan-workers input{background:#0f1620;color:var(--text)}
 :root[data-theme="dark"] .manual-metric,:root[data-theme="dark"] .manual-dpi{background:#111821}
+:root[data-theme="dark"] .notice.warn{background:#2b2414;border-color:#7a5a1c;color:#ffd37a}:root[data-theme="dark"] .codebox{background:#111821}
 :root[data-theme="dark"] .chip.active{background:#e7edf5;color:#111821;border-color:#e7edf5}
 :root[data-theme="dark"] .chip.active small{color:#475569}
 :root[data-theme="dark"] th{background:var(--panel2);color:var(--muted)}
@@ -978,6 +1149,7 @@ button.button{font:inherit;cursor:pointer}
 </nav>
 
 <section class="tab-panel$overview_active" data-tab-panel="overview">
+$token_warning_html
 <section class="capture-banner ${capture_state:-idle}" id="captureBanner" data-state="$capture_state" data-start="$capture_time" data-duration="$capture_duration" data-remaining="$capture_remaining">
 <div class="capture-left"><span class="pulse"></span><div><b id="captureTitle">$capture_text</b><div class="muted" id="captureDetail">Новые DNS-запросы подхватываются автоматически во время активного окна.</div></div></div>
 <div class="capture-meta"><span class="timer" id="captureTimer">${capture_remaining:-}</span> <span class="live-tag" id="captureMode">$capture_mode_text</span></div>
@@ -1023,6 +1195,17 @@ button.button{font:inherit;cursor:pointer}
 <div class="pill-card"><span><span class="dot unchecked"></span>Ожидают</span><b>$unchecked_count</b></div>
 </section>
 
+<div class="source-panel">
+<div class="tool-title">Состояние связки</div>
+<div class="source-grid">
+<div class="source-card"><div class="source-row"><b>Режим</b><span class="source-state $mode_state">$mode_label_e</span></div><div class="muted">$mode_hint_e</div></div>
+<div class="source-card"><div class="source-row"><b>Ingest token</b><span class="source-state $([ -n "$SITEWATCH_INGEST_TOKEN" ] && echo ok || echo warn)">$ingest_token_label_e</span></div><div class="muted">Защита приема событий от роутерного агента</div></div>
+<div class="source-card"><div class="source-row"><b>v2rayA proxy</b><span class="source-state $go_state">$go_label_e</span></div><div class="muted">$proxy_label_e</div></div>
+<div class="source-card"><div class="source-row"><b>Pi-hole API</b><span class="source-state $pihole_state">$pihole_state</span></div><div class="muted">$pihole_label_e</div></div>
+$agent_check_html
+</div>
+</div>
+
 <form class="queue-actions" method="get" action="">
 <input type="hidden" name="action" value="scan_pending">
 <input type="hidden" name="source" value="$source_filter_e">
@@ -1039,6 +1222,25 @@ button.button{font:inherit;cursor:pointer}
 <span class="live-tag" id="scanMode">$scan_state</span>
 <div class="bar"><span id="scanBar" style="width:${scan_percent}%"></span></div>
 </section>
+
+<div class="utility-grid">
+<div class="source-panel">
+<div class="tool-title">Подключенные агенты</div>
+<table><thead><tr><th>Источник</th><th>Первый запрос</th><th>Последний запрос</th><th>Событий</th></tr></thead><tbody>
+EOF
+print_agent_rows
+cat <<EOF
+</tbody></table>
+</div>
+<div class="source-panel">
+<div class="tool-title">История запусков</div>
+<table><thead><tr><th>Время</th><th>Событие</th><th>Сек</th><th>Режим</th><th>Источник</th><th>DNS</th><th>Скан</th><th>VPN</th></tr></thead><tbody>
+EOF
+print_history_rows
+cat <<EOF
+</tbody></table>
+</div>
+</div>
 
 <div class="export-panel">
 <div class="tool-title">Выгрузка правил</div>
@@ -1103,7 +1305,7 @@ cat <<EOF
 <div class="diag-item"><span class="diag-state $logread_state">logread</span><b>$logread_label_e</b><small>файлы логов ниже</small></div>
 <div class="diag-item"><span class="diag-state $go_state">scan</span><b>$go_label_e</b><small>proxy: $proxy_label_e</small></div>
 </section>
-<div class="source-panel" id="settingsPanel">
+<div class="source-panel">
 <div class="tool-title">Диагностика источников</div>
 <div class="source-grid">
 <div class="source-card">
@@ -1133,7 +1335,8 @@ cat <<EOF
 </section>
 
 <section class="tab-panel$settings_active" data-tab-panel="settings">
-<div class="source-panel">
+<div class="source-panel" id="settingsPanel">
+$token_warning_html
 <div class="tool-title">Текущие параметры</div>
 <div class="source-grid">
 <div class="source-card"><b>Режим работы</b><div class="muted">$run_mode_label_e</div></div>
@@ -1159,10 +1362,12 @@ $agent_ingest_card_html
 $agent_ingest_input_html
 <label>Ingest token <input type="password" name="ingest_token" value="$ingest_token_e" placeholder="общий токен"></label>
 <label>Потоков распознавания <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
+<label>Хранить дней <input type="number" name="retention_days" min="1" max="365" step="1" value="$retention_days_e"></label>
 <button class="button primary" type="submit" id="settingsSubmit">Сохранить</button>
 </form>
 <div class="settings-save-status" id="settingsSaveStatus"><span class="spinner"></span><span>Сохранение настроек</span></div>
 </div>
+$router_setup_html
 
 </section>
 
