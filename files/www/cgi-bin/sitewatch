@@ -581,6 +581,9 @@ SITEWATCH_SCAN_WORKERS="$scan_workers"
 SITEWATCH_RETENTION_DAYS="$retention_days"
 SITEWATCH_RUN_MODE="$(normalize_run_mode "$SITEWATCH_RUN_MODE")"
 SITEWATCH_AGENT_INGEST_URL="$(normalize_container_addr "$SITEWATCH_AGENT_INGEST_URL")"
+if [ "$SITEWATCH_RUN_MODE" = "agent" ] && [ "$active_tab" != "settings" ]; then
+	active_tab="overview"
+fi
 active_capture_bin="$SITEWATCH_CAPTURE_BIN"
 active_capture_status="$SITEWATCH_CAPTURE_STATUS"
 if [ "$SITEWATCH_RUN_MODE" = "agent" ]; then
@@ -932,6 +935,8 @@ pihole_disabled_selected=""
 pihole_disk_selected=""
 pihole_live_selected=""
 [ "$SITEWATCH_PIHOLE_DISK" = "1" ] && pihole_disk_selected="selected" || pihole_live_selected="selected"
+body_mode_class=""
+[ "$SITEWATCH_RUN_MODE" = "agent" ] && body_mode_class="mode-agent"
 
 if [ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/dnsmasq ]; then
 	mode_label="Нативный OpenWrt"
@@ -1157,6 +1162,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .source-panel,.manual-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 8px 22px rgba(20,35,55,.045)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.source-card{border:1px solid var(--line);border-radius:8px;padding:12px;background:rgba(255,255,255,.35)}.source-card b{display:block;margin-bottom:4px}.source-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-state{border-radius:999px;border:1px solid var(--line);padding:3px 8px;font-weight:800;font-size:12px;color:var(--muted)}.source-state.ok{color:var(--green)}.source-state.warn{color:var(--amber)}.source-state.off{color:var(--muted)}.notice{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:grid;gap:3px}.notice.warn{border-color:#f0d27a;background:#fff7df;color:#6f4a00}.codebox{border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.35);padding:12px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .manual-panel form{display:grid;grid-template-columns:minmax(260px,1fr) auto auto;gap:10px;align-items:center}.manual-panel input[type="text"]{border:1px solid var(--line);border-radius:7px;min-height:38px;padding:8px 10px;background:#fff;color:var(--text)}.checkline{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:650}.manual-result{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}.manual-result:empty{display:none}.manual-metric{border:1px solid var(--line);border-radius:8px;padding:10px;background:rgba(255,255,255,.35)}.manual-metric span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}.manual-metric b{display:block;margin-top:4px;word-break:break-word}.manual-dpi{grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:rgba(255,255,255,.25)}.manual-dpi summary{cursor:pointer;font-weight:800;color:var(--muted)}.manual-dpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.manual-loading{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.manual-panel.loading .manual-loading{display:flex}.spinner{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .settings-form{display:grid;grid-template-columns:160px minmax(260px,1fr) minmax(220px,1fr) 110px auto;gap:8px;align-items:end;margin-top:12px}.settings-form label{display:grid;gap:5px;color:var(--muted);font-weight:800}.settings-form input,.settings-form select{width:100%;border:1px solid var(--line);border-radius:7px;min-height:36px;padding:7px 9px;background:#fff;color:var(--text);font-weight:800}.settings-save-status{display:none;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-weight:750}.source-panel.saving .settings-save-status{display:flex}.source-panel.saving .settings-form{opacity:.72;pointer-events:none}.button.saving{position:relative}
+.mode-agent .agent-hidden{display:none!important}.mode-agent .toolbar{grid-template-columns:minmax(0,1fr)}.mode-agent .source-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 th.sortable{cursor:pointer;user-select:none}.sort-indicator{color:var(--muted);font-size:11px;margin-left:4px}
@@ -1196,7 +1202,7 @@ button.button{font:inherit;cursor:pointer}
 @media(max-width:560px){.summary,.source-grid,.manual-result,.manual-dpi-grid,.mode-strip,.diag-grid{grid-template-columns:1fr}.button{width:100%;justify-content:center}.tool form{display:block}.tool input,.tool select,.tool .button{width:100%;margin-top:8px}th:nth-child(4),td:nth-child(4){display:none}}
 </style>
 </head>
-<body>
+<body class="$body_mode_class">
 <main>
 <section class="top">
 <div class="brand"><div class="mark">SW</div><div><h1>SiteWatch</h1><div class="subtitle">Мониторинг блокировок по устройствам без постоянного DNS-логирования</div></div></div>
@@ -1209,10 +1215,10 @@ button.button{font:inherit;cursor:pointer}
 
 <nav class="tabs" aria-label="Разделы SiteWatch">
 <button class="tab-button$overview_active" type="button" data-tab="overview">Обзор</button>
-<button class="tab-button$domains_active" type="button" data-tab="domains">Домены</button>
-<button class="tab-button$manual_active" type="button" data-tab="manual">Проверка URL</button>
+<button class="tab-button$domains_active agent-hidden" type="button" data-tab="domains">Домены</button>
+<button class="tab-button$manual_active agent-hidden" type="button" data-tab="manual">Проверка URL</button>
 <button class="tab-button$settings_active" type="button" data-tab="settings">Настройки</button>
-<button class="tab-button$diagnostics_active" type="button" data-tab="diagnostics">Диагностика</button>
+<button class="tab-button$diagnostics_active agent-hidden" type="button" data-tab="diagnostics">Диагностика</button>
 </nav>
 
 <section class="tab-panel$overview_active" data-tab-panel="overview">
@@ -1246,7 +1252,7 @@ $token_warning_html
 </div>
 </section>
 
-<section class="summary">
+<section class="summary agent-hidden">
 <div class="stat wide"><div class="k">Фильтр / последний скан</div><span class="v" id="summaryScope">$source_title_e · $last_scan</span></div>
 <div class="stat"><div class="k">DNS-запросов</div><span class="v" id="summarySeen">$total_seen</span></div>
 <div class="stat"><div class="k">Проверено</div><span class="v" id="summaryResults">$total_results</span></div>
@@ -1254,7 +1260,7 @@ $token_warning_html
 <div class="stat"><div class="k">Ожидает</div><span class="v">$unchecked_count</span></div>
 </section>
 
-<section class="health">
+<section class="health agent-hidden">
 <div class="pill-card"><span><span class="dot blocked"></span>Заблокированы</span><b>$blocked_count</b></div>
 <div class="pill-card"><span><span class="dot slow"></span>Замедлены</span><b>$slow_count</b></div>
 <div class="pill-card"><span><span class="dot ok"></span>Норма</span><b>$ok_count</b></div>
@@ -1267,13 +1273,13 @@ $token_warning_html
 <div class="source-grid">
 <div class="source-card"><div class="source-row"><b>Режим</b><span class="source-state $mode_state">$mode_label_e</span></div><div class="muted">$mode_hint_e</div></div>
 <div class="source-card"><div class="source-row"><b>Ingest token</b><span class="source-state $([ -n "$SITEWATCH_INGEST_TOKEN" ] && echo ok || echo warn)">$ingest_token_label_e</span></div><div class="muted">Защита приема событий от роутерного агента</div></div>
-<div class="source-card"><div class="source-row"><b>v2rayA proxy</b><span class="source-state $go_state">$go_label_e</span></div><div class="muted">$proxy_label_e</div></div>
-<div class="source-card"><div class="source-row"><b>Pi-hole API</b><span class="source-state $pihole_state">$pihole_state</span></div><div class="muted">$pihole_label_e</div></div>
+<div class="source-card agent-hidden"><div class="source-row"><b>v2rayA proxy</b><span class="source-state $go_state">$go_label_e</span></div><div class="muted">$proxy_label_e</div></div>
+<div class="source-card agent-hidden"><div class="source-row"><b>Pi-hole API</b><span class="source-state $pihole_state">$pihole_state</span></div><div class="muted">$pihole_label_e</div></div>
 $agent_check_html
 </div>
 </div>
 
-<form class="queue-actions" method="get" action="">
+<form class="queue-actions agent-hidden" method="get" action="">
 <input type="hidden" name="action" value="scan_pending">
 <input type="hidden" name="source" value="$source_filter_e">
 <label class="scan-workers">Потоков <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
@@ -1281,7 +1287,7 @@ $agent_check_html
 <a class="button danger" href="?action=clear_observations" data-confirm="Очистить DNS-запросы, результаты проверок и VPN-список?">Очистить наблюдения</a>
 </form>
 
-<section class="scan-progress" id="scanProgress" data-state="$scan_state" data-total="$scan_total" data-done="$scan_done">
+<section class="scan-progress agent-hidden" id="scanProgress" data-state="$scan_state" data-total="$scan_total" data-done="$scan_done">
 <div>
 <div class="scan-text" id="scanText">$scan_label_e</div>
 <div class="scan-current" id="scanCurrent">$scan_current_e</div>
@@ -1290,7 +1296,7 @@ $agent_check_html
 <div class="bar"><span id="scanBar" style="width:${scan_percent}%"></span></div>
 </section>
 
-<div class="utility-grid">
+<div class="utility-grid agent-hidden">
 <div class="source-panel">
 <div class="tool-title">Подключенные агенты</div>
 <table><thead><tr><th>Источник</th><th>Первый запрос</th><th>Последний запрос</th><th>Событий</th></tr></thead><tbody>
@@ -1309,7 +1315,7 @@ cat <<EOF
 </div>
 </div>
 
-<div class="export-panel">
+<div class="export-panel agent-hidden">
 <div class="tool-title">Выгрузка правил</div>
 <form class="export-grid" method="get" action="">
 <select name="action">
@@ -1410,12 +1416,12 @@ $token_warning_html
 <div class="source-card"><b>Назначение режима</b><div class="muted">$run_mode_hint_e</div></div>
 $agent_ingest_card_html
 <div class="source-card"><b>Ingest token</b><div class="muted">$ingest_token_label_e</div></div>
-<div class="source-card"><b>Proxy v2rayA</b><div class="muted">$proxy_label_e</div></div>
-<div class="source-card"><b>Потоков распознавания</b><div class="muted">$scan_workers_e</div></div>
-<div class="source-card"><b>dnsmasq control</b><div class="muted">$dnsmasq_control_label_e</div></div>
-<div class="source-card"><b>logread</b><div class="muted">$logread_label_e</div></div>
-<div class="source-card"><b>Pi-hole API</b><div class="muted">$pihole_label_e</div></div>
-<div class="source-card"><b>Prometheus</b><div class="muted">$metrics_path_e</div></div>
+<div class="source-card agent-hidden"><b>Proxy v2rayA</b><div class="muted">$proxy_label_e</div></div>
+<div class="source-card agent-hidden"><b>Потоков распознавания</b><div class="muted">$scan_workers_e</div></div>
+<div class="source-card agent-hidden"><b>dnsmasq control</b><div class="muted">$dnsmasq_control_label_e</div></div>
+<div class="source-card agent-hidden"><b>logread</b><div class="muted">$logread_label_e</div></div>
+<div class="source-card agent-hidden"><b>Pi-hole API</b><div class="muted">$pihole_label_e</div></div>
+<div class="source-card agent-hidden"><b>Prometheus</b><div class="muted">$metrics_path_e</div></div>
 </div>
 <form class="settings-form" method="get" action="">
 <input type="hidden" name="action" value="save_settings">
@@ -1428,24 +1434,24 @@ $agent_ingest_card_html
 </label>
 $agent_ingest_input_html
 <label>Ingest token <input type="password" name="ingest_token" value="$ingest_token_e" placeholder="общий токен"></label>
-<label>Потоков распознавания <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
-<label>Хранить дней <input type="number" name="retention_days" min="1" max="365" step="1" value="$retention_days_e"></label>
-<label>Pi-hole API
+<label class="agent-hidden">Потоков распознавания <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
+<label class="agent-hidden">Хранить дней <input type="number" name="retention_days" min="1" max="365" step="1" value="$retention_days_e"></label>
+<label class="agent-hidden">Pi-hole API
 <select name="pihole_enabled">
 <option value="0" $pihole_disabled_selected>Выключен</option>
 <option value="1" $pihole_enabled_selected>Включен</option>
 </select>
 </label>
-<label>Pi-hole URL <input type="text" name="pihole_url" value="$pihole_form_url_e" placeholder="http://192.168.1.2:8155"></label>
-<label>Pi-hole пароль <input type="password" name="pihole_password" value="$pihole_password_e" placeholder="пароль веб-интерфейса"></label>
-<label>Pi-hole база
+<label class="agent-hidden">Pi-hole URL <input type="text" name="pihole_url" value="$pihole_form_url_e" placeholder="http://192.168.1.2:8155"></label>
+<label class="agent-hidden">Pi-hole пароль <input type="password" name="pihole_password" value="$pihole_password_e" placeholder="пароль веб-интерфейса"></label>
+<label class="agent-hidden">Pi-hole база
 <select name="pihole_disk">
 <option value="0" $pihole_live_selected>Live</option>
 <option value="1" $pihole_disk_selected>Disk</option>
 </select>
 </label>
-<label>Pi-hole секунд <input type="number" name="pihole_lookback" min="60" max="31536000" step="60" value="$pihole_lookback_e"></label>
-<label>Pi-hole лимит <input type="number" name="pihole_limit" min="100" max="10000" step="100" value="$pihole_limit_e"></label>
+<label class="agent-hidden">Pi-hole секунд <input type="number" name="pihole_lookback" min="60" max="31536000" step="60" value="$pihole_lookback_e"></label>
+<label class="agent-hidden">Pi-hole лимит <input type="number" name="pihole_limit" min="100" max="10000" step="100" value="$pihole_limit_e"></label>
 <button class="button primary" type="submit" id="settingsSubmit">Сохранить</button>
 </form>
 <div class="settings-save-status" id="settingsSaveStatus"><span class="spinner"></span><span>Сохранение настроек</span></div>
