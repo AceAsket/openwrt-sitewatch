@@ -285,6 +285,39 @@ status_label() {
 	esac
 }
 
+network_status_label() {
+	case "$1" in
+		observed) echo "замечен" ;;
+		suspect) echo "подозрительно" ;;
+		ok) echo "доступно" ;;
+		timeout) echo "таймаут" ;;
+		error|failed) echo "ошибка" ;;
+		not_available) echo "недоступно" ;;
+		blocked) echo "заблокирован" ;;
+		slow) echo "замедлен" ;;
+		"") echo "-" ;;
+		*) echo "$1" ;;
+	esac
+}
+
+network_detail_label() {
+	case "$1" in
+		conntrack) echo "снимок conntrack" ;;
+		snapshot) echo "текущий снимок" ;;
+		"conntrack is not available"|not_available) echo "conntrack недоступен" ;;
+		*"no ASSURED state"*)
+			network_detail_duration="$(printf "%s" "$1" | sed -n 's/^delta \([0-9][0-9]*\)s.*/\1/p')"
+			[ -n "$network_detail_duration" ] && echo "дельта ${network_detail_duration} с, нет ASSURED-состояния" || echo "нет ASSURED-состояния"
+			;;
+		delta\ *s)
+			network_detail_duration="$(printf "%s" "$1" | sed -n 's/^delta \([0-9][0-9]*\)s$/\1/p')"
+			[ -n "$network_detail_duration" ] && echo "дельта ${network_detail_duration} с" || echo "$1"
+			;;
+		"") echo "-" ;;
+		*) echo "$1" ;;
+	esac
+}
+
 capture_label() {
 	case "$1" in
 		running) echo "идет" ;;
@@ -564,8 +597,10 @@ print_net_probe_rows() {
 	fi
 	printf "%s\n" "$rows" | awk -F '\t' 'NF >= 7 { print }' | tail -n 12 | while IFS="$(printf '\t')" read -r ts mode target port status rtt detail; do
 		ts_h="$(date -d "@$ts" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$ts")"
+		status_text="$(network_status_label "$status")"
+		detail_text="$(network_detail_label "$detail")"
 		printf '<tr><td class="muted">%s</td><td>%s</td><td class="source">%s</td><td class="metric">%s</td><td><span class="status %s">%s</span></td><td class="metric">%s с</td><td class="muted">%s</td></tr>\n' \
-			"$(printf "%s" "$ts_h" | html_escape)" "$(printf "%s" "$mode" | html_escape)" "$(printf "%s" "$target" | html_escape)" "$(printf "%s" "$port" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$rtt" | html_escape)" "$(printf "%s" "$detail" | html_escape)"
+			"$(printf "%s" "$ts_h" | html_escape)" "$(printf "%s" "$mode" | html_escape)" "$(printf "%s" "$target" | html_escape)" "$(printf "%s" "$port" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$status_text" | html_escape)" "$(printf "%s" "$rtt" | html_escape)" "$(printf "%s" "$detail_text" | html_escape)"
 	done
 }
 
@@ -577,8 +612,10 @@ print_flow_probe_rows() {
 	fi
 	printf "%s\n" "$rows" | awk -F '\t' 'NF >= 9 { print }' | tail -n 12 | while IFS="$(printf '\t')" read -r ts mode source target port status packets bytes detail; do
 		ts_h="$(date -d "@$ts" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$ts")"
+		status_text="$(network_status_label "$status")"
+		detail_text="$(network_detail_label "$detail")"
 		printf '<tr><td class="muted">%s</td><td>%s</td><td class="source">%s</td><td class="source">%s</td><td class="metric">%s</td><td><span class="status %s">%s</span></td><td class="metric">%s</td><td class="metric">%s</td><td class="muted">%s</td></tr>\n' \
-			"$(printf "%s" "$ts_h" | html_escape)" "$(printf "%s" "$mode" | html_escape)" "$(printf "%s" "$source" | html_escape)" "$(printf "%s" "$target" | html_escape)" "$(printf "%s" "$port" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$packets" | html_escape)" "$(printf "%s" "$bytes" | html_escape)" "$(printf "%s" "$detail" | html_escape)"
+			"$(printf "%s" "$ts_h" | html_escape)" "$(printf "%s" "$mode" | html_escape)" "$(printf "%s" "$source" | html_escape)" "$(printf "%s" "$target" | html_escape)" "$(printf "%s" "$port" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$status_text" | html_escape)" "$(printf "%s" "$packets" | html_escape)" "$(printf "%s" "$bytes" | html_escape)" "$(printf "%s" "$detail_text" | html_escape)"
 	done
 }
 
@@ -621,8 +658,10 @@ print_network_report_rows() {
 	printf "%s\n" "$rows" | while IFS="$(printf '\t')" read -r status packets bytes samples last source proto target port detail; do
 		[ -n "$source" ] || continue
 		last_h="$(date -d "@$last" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last")"
+		status_text="$(network_status_label "$status")"
+		detail_text="$(network_detail_label "$detail")"
 		printf '<tr><td><span class="status %s">%s</span></td><td class="source">%s</td><td>%s</td><td class="source">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="muted">%s</td><td class="muted">%s</td></tr>\n' \
-			"$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$source" | html_escape)" "$(printf "%s" "$proto" | html_escape)" "$(printf "%s" "$target" | html_escape)" "$(printf "%s" "$port" | html_escape)" "$(printf "%s" "$packets" | html_escape)" "$(printf "%s" "$bytes" | html_escape)" "$(printf "%s" "$samples" | html_escape)" "$(printf "%s" "$last_h" | html_escape)" "$(printf "%s" "$detail" | html_escape)"
+			"$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$status_text" | html_escape)" "$(printf "%s" "$source" | html_escape)" "$(printf "%s" "$proto" | html_escape)" "$(printf "%s" "$target" | html_escape)" "$(printf "%s" "$port" | html_escape)" "$(printf "%s" "$packets" | html_escape)" "$(printf "%s" "$bytes" | html_escape)" "$(printf "%s" "$samples" | html_escape)" "$(printf "%s" "$last_h" | html_escape)" "$(printf "%s" "$detail_text" | html_escape)"
 	done
 }
 
@@ -1361,7 +1400,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 th.sortable{cursor:pointer;user-select:none}.sort-indicator{color:var(--muted);font-size:11px;margin-left:4px}
-.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}.status.suspect{background:#fff3cf;color:var(--amber)}.status.observed{background:#e7f4ea;color:var(--green)}
+.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}.status.suspect{background:#fff3cf;color:var(--amber)}.status.observed{background:#e7f4ea;color:var(--green)}.status.timeout,.status.error,.status.failed,.status.not_available{background:#fde8eb;color:var(--red)}
 .domain{font-weight:750}.source,.metric{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.muted{color:var(--muted)}.empty{padding:28px;text-align:center;color:var(--muted)}
 .dpi-tag{border:1px solid var(--line);border-radius:999px;padding:3px 7px;color:var(--muted);font-size:12px;font-weight:800;white-space:nowrap}
 .dpi-tag.detected{border-color:#d99000;color:#d99000;background:rgba(217,144,0,.08)}
@@ -1390,7 +1429,7 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.ok{background:#173322;color:#6ee092}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
-:root[data-theme="dark"] .status.suspect{background:#332713;color:#ffd37a}:root[data-theme="dark"] .status.observed{background:#173322;color:#6ee092}
+:root[data-theme="dark"] .status.suspect{background:#332713;color:#ffd37a}:root[data-theme="dark"] .status.observed{background:#173322;color:#6ee092}:root[data-theme="dark"] .status.timeout,:root[data-theme="dark"] .status.error,:root[data-theme="dark"] .status.failed,:root[data-theme="dark"] .status.not_available{background:#3a1b24;color:#ff8994}
 :root[data-theme="dark"] .diag-state.ok{background:#173322;color:#6ee092}:root[data-theme="dark"] .diag-state.warn{background:#332713;color:#ffd37a}:root[data-theme="dark"] .diag-state.off{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
 :root[data-theme="dark"] .scan-progress{background:var(--panel)}:root[data-theme="dark"] .bar{background:#202a37}
@@ -1532,7 +1571,7 @@ cat <<EOF
 
 <section class="tab-panel$network_active" data-tab-panel="network">
 <div class="source-panel">
-<div class="panel-head"><div><div class="tool-title">Сетевой отчет</div><div class="muted">Non-DNS трафик из пассивного conntrack: источник, протокол, внешний IP и порт.</div></div><form class="export-grid" method="get" action=""><input type="hidden" name="source" value="$source_filter_e"><select name="action"><option value="export_network">Все: proto:ip:port</option><option value="export_network_suspect">Подозрительные: proto:ip:port</option><option value="export_network_csv">CSV</option><option value="export_network_v2raya">Подозрительные IP: v2rayA</option></select><button class="button" type="submit">Скачать</button></form></div>
+<div class="panel-head"><div><div class="tool-title">Сетевой отчет</div><div class="muted">Трафик без доменного имени из пассивного conntrack: источник, протокол, внешний IP и порт.</div></div><form class="export-grid" method="get" action=""><input type="hidden" name="source" value="$source_filter_e"><select name="action"><option value="export_network">Все: proto:ip:port</option><option value="export_network_suspect">Подозрительные: proto:ip:port</option><option value="export_network_csv">CSV</option><option value="export_network_v2raya">Подозрительные IP: v2rayA</option></select><button class="button" type="submit">Скачать</button></form></div>
 <form class="settings-form" method="get" action="">
 <input type="hidden" name="tab" value="network">
 <label>Источник <input type="text" name="source" value="$source_filter_e" placeholder="192.168.50.80" autocomplete="off"></label>
