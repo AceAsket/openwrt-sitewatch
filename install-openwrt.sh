@@ -1,6 +1,39 @@
 #!/bin/ash
 set -eu
 
+INSTALL_LUCI="${SITEWATCH_INSTALL_LUCI:-0}"
+
+usage() {
+	cat <<'USAGE'
+Usage: ./install-openwrt.sh [--luci]
+
+Installs SiteWatch on OpenWrt.
+
+Options:
+  --luci   Also add a LuCI menu entry under Services -> SiteWatch
+  -h, --help
+           Show this help
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--luci)
+			INSTALL_LUCI=1
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			echo "Unknown option: $1" >&2
+			usage >&2
+			exit 2
+			;;
+	esac
+	shift
+done
+
 mkdir -p /etc/sitewatch /usr/bin /www/sitewatch/cgi-bin
 
 cp ./sitewatch.conf /etc/sitewatch/sitewatch.conf
@@ -43,6 +76,19 @@ cp ./files/www/cgi-bin/metrics /www/sitewatch/cgi-bin/metrics
 chmod +x /usr/bin/sitewatch-collect /usr/bin/sitewatch-capture /usr/bin/sitewatch-agent /usr/bin/sitewatch-scan /usr/bin/sitewatch-check-url /usr/bin/sitewatch-dns-dump /usr/bin/sitewatch-flow-probe /usr/bin/sitewatch-net-probe /usr/bin/sitewatch-reflector /www/sitewatch/cgi-bin/sitewatch /www/sitewatch/cgi-bin/metrics
 touch /etc/sitewatch/seen.tsv /etc/sitewatch/queue.tsv /etc/sitewatch/results.tsv /etc/sitewatch/proxy-domains.txt /etc/sitewatch/net-probes.tsv /etc/sitewatch/flow-probes.tsv
 
+if [ "$INSTALL_LUCI" = "1" ]; then
+	if [ -d /usr/share/luci/menu.d ] && [ -d /www/luci-static/resources/view ]; then
+		mkdir -p /usr/share/luci/menu.d /www/luci-static/resources/view/sitewatch
+		cp ./files/usr/share/luci/menu.d/luci-app-sitewatch.json /usr/share/luci/menu.d/luci-app-sitewatch.json
+		cp ./files/www/luci-static/resources/view/sitewatch/overview.js /www/luci-static/resources/view/sitewatch/overview.js
+		rm -f /tmp/luci-indexcache
+		rm -rf /tmp/luci-modulecache
+		echo "Installed LuCI entry: Services -> SiteWatch"
+	else
+		echo "LuCI files not found, skipped LuCI entry" >&2
+	fi
+fi
+
 if command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/uhttpd ]; then
 	uci -q delete uhttpd.sitewatch || true
 	uci set uhttpd.sitewatch=uhttpd
@@ -60,6 +106,7 @@ if command -v uci >/dev/null 2>&1 && [ -x /etc/init.d/uhttpd ]; then
 fi
 
 echo "Installed. Open: http://<router-ip>:8095/"
+echo "Optional LuCI entry: rerun ./install-openwrt.sh --luci"
 echo "Needed packages for shell fallback and Pi-hole API: curl ca-bundle."
 echo "If a matching dist/sitewatch-linux-* binary was present, scan/check-url use /usr/bin/sitewatch without curl."
 echo "For container mode, configure SITEWATCH_AGENT_INGEST_URL and run: sitewatch-agent 45"

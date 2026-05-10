@@ -230,6 +230,14 @@ chmod +x install-openwrt.sh
 ./install-openwrt.sh
 ```
 
+Опционально добавить пункт в LuCI:
+
+```sh
+./install-openwrt.sh --luci
+```
+
+После этого в LuCI появится **Services -> SiteWatch**. Пункт не встраивает весь UI в LuCI, а открывает отдельный интерфейс SiteWatch на `http://<router-ip>:8095/`, чтобы основная админка OpenWrt оставалась изолированной от длинных сканов и live-наблюдения.
+
 Открыть:
 
 ```text

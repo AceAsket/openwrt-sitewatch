@@ -11,6 +11,7 @@ Usage: ./uninstall-openwrt.sh [--backup DIR] [--purge-data]
 Removes SiteWatch from OpenWrt:
   - stops an active capture window
   - removes the dedicated uhttpd.sitewatch instance
+  - removes the optional LuCI Services menu entry
   - removes CGI and helper binaries
   - keeps /etc/sitewatch data by default
 
@@ -83,6 +84,10 @@ rm -f \
 	/usr/bin/sitewatch-reflector
 
 rm -rf /www/sitewatch
+rm -f /usr/share/luci/menu.d/luci-app-sitewatch.json
+rm -rf /www/luci-static/resources/view/sitewatch
+rm -f /tmp/luci-indexcache
+rm -rf /tmp/luci-modulecache
 rm -f \
 	/tmp/sitewatch-capture.status \
 	/tmp/sitewatch-capture.stop \
