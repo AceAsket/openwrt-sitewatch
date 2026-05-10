@@ -582,6 +582,78 @@ print_flow_probe_rows() {
 	done
 }
 
+print_network_report_rows() {
+	[ -f "$SITEWATCH_FLOW_RESULTS" ] || {
+		printf '<tr><td class="empty" colspan="10">Сетевой отчет пока пуст. Запусти пассивное conntrack-наблюдение во время проблемного сервиса.</td></tr>\n'
+		return 0
+	}
+	awk -F '\t' -v source_filter="$source_filter" '
+		function is_noise_target(ip) {
+			return ip ~ /^10\./ || ip ~ /^192\.168\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[0-1])\./ || ip ~ /^127\./ || ip ~ /^0\./ || ip ~ /^169\.254\./ || ip ~ /^224\./ || ip ~ /^239\./ || ip == "255.255.255.255" || ip ~ /\.255$/ || ip ~ /^fd/ || ip ~ /^fe80:/ || ip ~ /^ff/;
+		}
+		NF >= 9 && (source_filter == "" || $3 == source_filter) && !is_noise_target($4) {
+			proto = $2;
+			sub(/^passive-/, "", proto);
+			key = $3 OFS proto OFS $4 OFS $5;
+			if (!(key in first) || $1 < first[key]) first[key] = $1;
+			if ($1 >= last[key]) {
+				last[key] = $1;
+				last_status[key] = $6;
+				last_detail[key] = $9;
+			}
+			if ($6 == "suspect") suspect[key] = 1;
+			packets[key] += $7 + 0;
+			bytes[key] += $8 + 0;
+			samples[key]++;
+		}
+		END {
+			for (key in samples) {
+				status = suspect[key] ? "suspect" : last_status[key];
+				print status, packets[key] + 0, bytes[key] + 0, samples[key] + 0, last[key] + 0, key, last_detail[key];
+			}
+		}
+	' "$SITEWATCH_FLOW_RESULTS" | sort -t "$(printf '\t')" -k1,1r -k2,2nr | head -n 30 | while IFS="$(printf '\t')" read -r status packets bytes samples last source proto target port detail; do
+		[ -n "$source" ] || continue
+		last_h="$(date -d "@$last" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last")"
+		printf '<tr><td><span class="status %s">%s</span></td><td class="source">%s</td><td>%s</td><td class="source">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="muted">%s</td><td class="muted">%s</td></tr>\n' \
+			"$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$status" | html_escape)" "$(printf "%s" "$source" | html_escape)" "$(printf "%s" "$proto" | html_escape)" "$(printf "%s" "$target" | html_escape)" "$(printf "%s" "$port" | html_escape)" "$(printf "%s" "$packets" | html_escape)" "$(printf "%s" "$bytes" | html_escape)" "$(printf "%s" "$samples" | html_escape)" "$(printf "%s" "$last_h" | html_escape)" "$(printf "%s" "$detail" | html_escape)"
+	done
+}
+
+print_network_export() {
+	status_filter="$1"
+	mode="$2"
+	[ -f "$SITEWATCH_FLOW_RESULTS" ] || return 0
+	awk -F '\t' -v status_filter="$status_filter" -v mode="$mode" '
+		function is_noise_target(ip) {
+			return ip ~ /^10\./ || ip ~ /^192\.168\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[0-1])\./ || ip ~ /^127\./ || ip ~ /^0\./ || ip ~ /^169\.254\./ || ip ~ /^224\./ || ip ~ /^239\./ || ip == "255.255.255.255" || ip ~ /\.255$/ || ip ~ /^fd/ || ip ~ /^fe80:/ || ip ~ /^ff/;
+		}
+		NF >= 9 && !is_noise_target($4) {
+			proto = $2;
+			sub(/^passive-/, "", proto);
+			key = proto "\t" $4 "\t" $5;
+			if ($6 == "suspect") suspect[key] = 1;
+			seen[key] = 1;
+		}
+		END {
+			for (key in seen) {
+				if (status_filter == "suspect" && !suspect[key]) continue;
+				split(key, p, "\t");
+				proto = p[1];
+				ip = p[2];
+				port = p[3];
+				if (mode == "v2raya") {
+					print "ip(" ip ") -> proxy";
+				} else if (mode == "csv") {
+					print proto "," ip "," port "," (suspect[key] ? "suspect" : "observed");
+				} else {
+					print proto ":" ip ":" port;
+				}
+			}
+		}
+	' "$SITEWATCH_FLOW_RESULTS" | sort -u
+}
+
 action="$(param action)"
 active_tab="$(normalize_tab "$(safe_token "$(param tab)")")"
 source_filter="$(safe_token "$(param source)")"
@@ -876,6 +948,31 @@ case "$action" in
 		printf "Content-Type: text/plain; charset=utf-8\r\n"
 		printf "Content-Disposition: attachment; filename=\"v2raya-base-rules.txt\"\r\n\r\n"
 		print_result_domains problem v2raya_base
+		exit 0
+		;;
+	export_network)
+		printf "Content-Type: text/plain; charset=utf-8\r\n"
+		printf "Content-Disposition: attachment; filename=\"network-flows.txt\"\r\n\r\n"
+		print_network_export all plain
+		exit 0
+		;;
+	export_network_suspect)
+		printf "Content-Type: text/plain; charset=utf-8\r\n"
+		printf "Content-Disposition: attachment; filename=\"network-suspect-flows.txt\"\r\n\r\n"
+		print_network_export suspect plain
+		exit 0
+		;;
+	export_network_csv)
+		printf "Content-Type: text/csv; charset=utf-8\r\n"
+		printf "Content-Disposition: attachment; filename=\"network-flows.csv\"\r\n\r\n"
+		printf "proto,ip,port,status\n"
+		print_network_export all csv
+		exit 0
+		;;
+	export_network_v2raya)
+		printf "Content-Type: text/plain; charset=utf-8\r\n"
+		printf "Content-Disposition: attachment; filename=\"v2raya-network-rules.txt\"\r\n\r\n"
+		print_network_export suspect v2raya
 		exit 0
 		;;
 esac
@@ -1256,7 +1353,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 th.sortable{cursor:pointer;user-select:none}.sort-indicator{color:var(--muted);font-size:11px;margin-left:4px}
-.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}
+.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}.status.suspect{background:#fff3cf;color:var(--amber)}.status.observed{background:#e7f4ea;color:var(--green)}
 .domain{font-weight:750}.source,.metric{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.muted{color:var(--muted)}.empty{padding:28px;text-align:center;color:var(--muted)}
 .dpi-tag{border:1px solid var(--line);border-radius:999px;padding:3px 7px;color:var(--muted);font-size:12px;font-weight:800;white-space:nowrap}
 .dpi-tag.detected{border-color:#d99000;color:#d99000;background:rgba(217,144,0,.08)}
@@ -1285,6 +1382,7 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] .status.ok{background:#173322;color:#6ee092}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
+:root[data-theme="dark"] .status.suspect{background:#332713;color:#ffd37a}:root[data-theme="dark"] .status.observed{background:#173322;color:#6ee092}
 :root[data-theme="dark"] .diag-state.ok{background:#173322;color:#6ee092}:root[data-theme="dark"] .diag-state.warn{background:#332713;color:#ffd37a}:root[data-theme="dark"] .diag-state.off{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .capture-banner{background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
 :root[data-theme="dark"] .scan-progress{background:var(--panel)}:root[data-theme="dark"] .bar{background:#202a37}
@@ -1417,6 +1515,10 @@ cat <<EOF
 <option value="export_v2raya_slow">Замедленные: v2rayA</option>
 <option value="export_base">Базовые домены</option>
 <option value="export_v2raya_base">Базовые домены: v2rayA</option>
+<option value="export_network">Сетевой отчет: proto:ip:port</option>
+<option value="export_network_suspect">Подозрительный трафик: proto:ip:port</option>
+<option value="export_network_csv">Сетевой отчет: CSV</option>
+<option value="export_network_v2raya">Подозрительные IP: v2rayA</option>
 </select>
 <button class="button" type="submit">Скачать</button>
 </form>
@@ -1535,6 +1637,14 @@ print_flow_probe_rows
 cat <<EOF
 </tbody></table>
 </div>
+</div>
+<div class="source-panel" style="margin-top:12px">
+<div class="panel-head"><div class="tool-title">Сетевой отчет</div><form class="export-grid" method="get" action=""><select name="action"><option value="export_network">Все: proto:ip:port</option><option value="export_network_suspect">Подозрительные: proto:ip:port</option><option value="export_network_csv">CSV</option><option value="export_network_v2raya">Подозрительные IP: v2rayA</option></select><button class="button" type="submit">Скачать</button></form></div>
+<table><thead><tr><th>Статус</th><th>Источник</th><th>Протокол</th><th>IP</th><th>Порт</th><th>Пакетов</th><th>Байт</th><th>Сэмплов</th><th>Последний</th><th>Детали</th></tr></thead><tbody>
+EOF
+print_network_report_rows
+cat <<EOF
+</tbody></table>
 </div>
 </div>
 </section>

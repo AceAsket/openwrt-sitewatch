@@ -71,6 +71,9 @@ parse_snapshot() {
 	function is_lan(ip) {
 		return ip ~ /^10\./ || ip ~ /^192\.168\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[0-1])\./ || ip ~ /^fd/ || ip ~ /^fe80:/;
 	}
+	function is_noise_target(ip) {
+		return is_lan(ip) || ip ~ /^127\./ || ip ~ /^0\./ || ip ~ /^169\.254\./ || ip ~ /^224\./ || ip ~ /^239\./ || ip == "255.255.255.255" || ip ~ /\.255$/ || ip ~ /^ff/;
+	}
 	{
 		proto = "";
 		for (i = 1; i <= NF; i++) {
@@ -85,7 +88,7 @@ parse_snapshot() {
 		dport = field("dport") + 0;
 		bytes = field("bytes") + 0;
 		packets = field("packets") + 0;
-		if (src ~ /^127\./ || src == "" || dst == "" || dport == 0 || !is_lan(src)) next;
+		if (src ~ /^127\./ || src == "" || dst == "" || dport == 0 || !is_lan(src) || is_noise_target(dst)) next;
 		if (proto == "udp" && !in_ranges(dport, udp_ranges)) next;
 		if (proto == "tcp" && !in_ranges(dport, tcp_ranges)) next;
 		assured = ($0 ~ /ASSURED/) ? 1 : 0;
