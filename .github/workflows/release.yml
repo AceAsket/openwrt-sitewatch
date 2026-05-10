@@ -48,7 +48,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          prerelease=""
+          case "$RELEASE_TAG" in
+            *-rc*|*-beta*|*-alpha*) prerelease="--prerelease" ;;
+          esac
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "SiteWatch $RELEASE_TAG" \
-            --notes-file RELEASE_NOTES.md
+            --notes-file RELEASE_NOTES.md \
+            $prerelease
