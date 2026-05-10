@@ -105,7 +105,7 @@ normalize_run_mode() {
 
 normalize_tab() {
 	case "$1" in
-		overview|domains|manual|settings|diagnostics) printf "%s" "$1" ;;
+		overview|domains|network|manual|settings|diagnostics) printf "%s" "$1" ;;
 		*) printf "overview" ;;
 	esac
 }
@@ -587,7 +587,8 @@ print_network_report_rows() {
 		printf '<tr><td class="empty" colspan="10">Сетевой отчет пока пуст. Запусти пассивное conntrack-наблюдение во время проблемного сервиса.</td></tr>\n'
 		return 0
 	}
-	awk -F '\t' -v source_filter="$source_filter" '
+	rows="$(awk -F '\t' -v source_filter="$source_filter" '
+		BEGIN { OFS = "\t" }
 		function is_noise_target(ip) {
 			return ip ~ /^10\./ || ip ~ /^192\.168\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[0-1])\./ || ip ~ /^127\./ || ip ~ /^0\./ || ip ~ /^169\.254\./ || ip ~ /^224\./ || ip ~ /^239\./ || ip == "255.255.255.255" || ip ~ /\.255$/ || ip ~ /^fd/ || ip ~ /^fe80:/ || ip ~ /^ff/;
 		}
@@ -612,7 +613,12 @@ print_network_report_rows() {
 				print status, packets[key] + 0, bytes[key] + 0, samples[key] + 0, last[key] + 0, key, last_detail[key];
 			}
 		}
-	' "$SITEWATCH_FLOW_RESULTS" | sort -t "$(printf '\t')" -k1,1r -k2,2nr | head -n 30 | while IFS="$(printf '\t')" read -r status packets bytes samples last source proto target port detail; do
+	' "$SITEWATCH_FLOW_RESULTS" | sort -t "$(printf '\t')" -k1,1r -k2,2nr | head -n 30)"
+	if [ -z "$rows" ]; then
+		printf '<tr><td class="empty" colspan="10">Для выбранного источника внешних flow пока нет.</td></tr>\n'
+		return 0
+	fi
+	printf "%s\n" "$rows" | while IFS="$(printf '\t')" read -r status packets bytes samples last source proto target port detail; do
 		[ -n "$source" ] || continue
 		last_h="$(date -d "@$last" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last")"
 		printf '<tr><td><span class="status %s">%s</span></td><td class="source">%s</td><td>%s</td><td class="source">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="metric">%s</td><td class="muted">%s</td><td class="muted">%s</td></tr>\n' \
@@ -624,11 +630,11 @@ print_network_export() {
 	status_filter="$1"
 	mode="$2"
 	[ -f "$SITEWATCH_FLOW_RESULTS" ] || return 0
-	awk -F '\t' -v status_filter="$status_filter" -v mode="$mode" '
+	awk -F '\t' -v status_filter="$status_filter" -v mode="$mode" -v source_filter="$source_filter" '
 		function is_noise_target(ip) {
 			return ip ~ /^10\./ || ip ~ /^192\.168\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[0-1])\./ || ip ~ /^127\./ || ip ~ /^0\./ || ip ~ /^169\.254\./ || ip ~ /^224\./ || ip ~ /^239\./ || ip == "255.255.255.255" || ip ~ /\.255$/ || ip ~ /^fd/ || ip ~ /^fe80:/ || ip ~ /^ff/;
 		}
-		NF >= 9 && !is_noise_target($4) {
+		NF >= 9 && (source_filter == "" || $3 == source_filter) && !is_noise_target($4) {
 			proto = $2;
 			sub(/^passive-/, "", proto);
 			key = proto "\t" $4 "\t" $5;
@@ -1235,11 +1241,13 @@ scan_workers_e="$(printf "%s" "$scan_workers" | html_escape)"
 sitewatch_version_e="$(printf "%s" "$SITEWATCH_VERSION" | html_escape)"
 overview_active=""
 domains_active=""
+network_active=""
 manual_active=""
 settings_active=""
 diagnostics_active=""
 case "$active_tab" in
 	domains) domains_active=" active" ;;
+	network) network_active=" active" ;;
 	manual) manual_active=" active" ;;
 	settings) settings_active=" active" ;;
 	diagnostics) diagnostics_active=" active" ;;
@@ -1404,6 +1412,7 @@ button.button{font:inherit;cursor:pointer}
 <nav class="tabs" aria-label="Разделы SiteWatch">
 <button class="tab-button$overview_active" type="button" data-tab="overview">Обзор</button>
 <button class="tab-button$domains_active agent-hidden" type="button" data-tab="domains">Домены</button>
+<button class="tab-button$network_active agent-hidden" type="button" data-tab="network">Сеть</button>
 <button class="tab-button$manual_active agent-hidden" type="button" data-tab="manual">Проверка URL</button>
 <button class="tab-button$settings_active" type="button" data-tab="settings">Настройки</button>
 <button class="tab-button$diagnostics_active agent-hidden" type="button" data-tab="diagnostics">Диагностика</button>
@@ -1515,13 +1524,26 @@ cat <<EOF
 <option value="export_v2raya_slow">Замедленные: v2rayA</option>
 <option value="export_base">Базовые домены</option>
 <option value="export_v2raya_base">Базовые домены: v2rayA</option>
-<option value="export_network">Сетевой отчет: proto:ip:port</option>
-<option value="export_network_suspect">Подозрительный трафик: proto:ip:port</option>
-<option value="export_network_csv">Сетевой отчет: CSV</option>
-<option value="export_network_v2raya">Подозрительные IP: v2rayA</option>
 </select>
 <button class="button" type="submit">Скачать</button>
 </form>
+</div>
+</section>
+
+<section class="tab-panel$network_active" data-tab-panel="network">
+<div class="source-panel">
+<div class="panel-head"><div><div class="tool-title">Сетевой отчет</div><div class="muted">Non-DNS трафик из пассивного conntrack: источник, протокол, внешний IP и порт.</div></div><form class="export-grid" method="get" action=""><input type="hidden" name="source" value="$source_filter_e"><select name="action"><option value="export_network">Все: proto:ip:port</option><option value="export_network_suspect">Подозрительные: proto:ip:port</option><option value="export_network_csv">CSV</option><option value="export_network_v2raya">Подозрительные IP: v2rayA</option></select><button class="button" type="submit">Скачать</button></form></div>
+<form class="settings-form" method="get" action="">
+<input type="hidden" name="tab" value="network">
+<label>Источник <input type="text" name="source" value="$source_filter_e" placeholder="192.168.50.80" autocomplete="off"></label>
+<button class="button" type="submit">Фильтровать</button>
+<a class="button" href="?tab=network">Все устройства</a>
+</form>
+<table><thead><tr><th>Статус</th><th>Источник</th><th>Протокол</th><th>IP</th><th>Порт</th><th>Пакетов</th><th>Байт</th><th>Сэмплов</th><th>Последний</th><th>Детали</th></tr></thead><tbody>
+EOF
+print_network_report_rows
+cat <<EOF
+</tbody></table>
 </div>
 </section>
 
@@ -1637,14 +1659,6 @@ print_flow_probe_rows
 cat <<EOF
 </tbody></table>
 </div>
-</div>
-<div class="source-panel" style="margin-top:12px">
-<div class="panel-head"><div class="tool-title">Сетевой отчет</div><form class="export-grid" method="get" action=""><select name="action"><option value="export_network">Все: proto:ip:port</option><option value="export_network_suspect">Подозрительные: proto:ip:port</option><option value="export_network_csv">CSV</option><option value="export_network_v2raya">Подозрительные IP: v2rayA</option></select><button class="button" type="submit">Скачать</button></form></div>
-<table><thead><tr><th>Статус</th><th>Источник</th><th>Протокол</th><th>IP</th><th>Порт</th><th>Пакетов</th><th>Байт</th><th>Сэмплов</th><th>Последний</th><th>Детали</th></tr></thead><tbody>
-EOF
-print_network_report_rows
-cat <<EOF
-</tbody></table>
 </div>
 </div>
 </section>
