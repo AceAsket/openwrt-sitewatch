@@ -25,6 +25,7 @@ COPY files/usr/bin/sitewatch-net-probe /usr/bin/sitewatch-net-probe
 COPY files/usr/bin/sitewatch-reflector /usr/bin/sitewatch-reflector
 COPY files/www/cgi-bin/sitewatch /www/sitewatch/cgi-bin/sitewatch
 COPY files/www/cgi-bin/metrics /www/sitewatch/cgi-bin/metrics
+COPY files/www/sitewatch/favicon.svg /www/sitewatch/favicon.svg
 COPY sitewatch.conf /usr/share/sitewatch/sitewatch.conf
 COPY scripts/docker-entrypoint.sh /usr/local/bin/sitewatch-docker-entrypoint
 

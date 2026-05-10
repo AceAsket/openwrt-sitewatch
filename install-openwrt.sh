@@ -72,6 +72,7 @@ cp ./files/usr/bin/sitewatch-net-probe /usr/bin/sitewatch-net-probe
 cp ./files/usr/bin/sitewatch-reflector /usr/bin/sitewatch-reflector
 cp ./files/www/cgi-bin/sitewatch /www/sitewatch/cgi-bin/sitewatch
 cp ./files/www/cgi-bin/metrics /www/sitewatch/cgi-bin/metrics
+cp ./files/www/sitewatch/favicon.svg /www/sitewatch/favicon.svg
 
 chmod +x /usr/bin/sitewatch-collect /usr/bin/sitewatch-capture /usr/bin/sitewatch-agent /usr/bin/sitewatch-scan /usr/bin/sitewatch-check-url /usr/bin/sitewatch-dns-dump /usr/bin/sitewatch-flow-probe /usr/bin/sitewatch-net-probe /usr/bin/sitewatch-reflector /www/sitewatch/cgi-bin/sitewatch /www/sitewatch/cgi-bin/metrics
 touch /etc/sitewatch/seen.tsv /etc/sitewatch/queue.tsv /etc/sitewatch/results.tsv /etc/sitewatch/proxy-domains.txt /etc/sitewatch/net-probes.tsv /etc/sitewatch/flow-probes.tsv
