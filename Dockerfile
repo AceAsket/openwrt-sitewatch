@@ -12,13 +12,14 @@ RUN export GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-amd64}"; \
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates curl busybox-extras
+RUN apk add --no-cache ca-certificates curl busybox-extras tcpdump
 
 COPY --from=build /out/sitewatch /usr/bin/sitewatch
 COPY files/usr/bin/sitewatch-collect /usr/bin/sitewatch-collect
 COPY files/usr/bin/sitewatch-capture /usr/bin/sitewatch-capture
 COPY files/usr/bin/sitewatch-scan /usr/bin/sitewatch-scan
 COPY files/usr/bin/sitewatch-check-url /usr/bin/sitewatch-check-url
+COPY files/usr/bin/sitewatch-dns-dump /usr/bin/sitewatch-dns-dump
 COPY files/usr/bin/sitewatch-flow-probe /usr/bin/sitewatch-flow-probe
 COPY files/usr/bin/sitewatch-net-probe /usr/bin/sitewatch-net-probe
 COPY files/usr/bin/sitewatch-reflector /usr/bin/sitewatch-reflector
@@ -33,6 +34,7 @@ RUN chmod +x \
 	/usr/bin/sitewatch-capture \
 	/usr/bin/sitewatch-scan \
 	/usr/bin/sitewatch-check-url \
+	/usr/bin/sitewatch-dns-dump \
 	/usr/bin/sitewatch-flow-probe \
 	/usr/bin/sitewatch-net-probe \
 	/usr/bin/sitewatch-reflector \

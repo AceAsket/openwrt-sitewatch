@@ -3,7 +3,7 @@
 Легкий локальный сканер для OpenWrt:
 
 - включает DNS query logging только на короткое окно наблюдения;
-- берет домены и источник запроса из DNS-логов Pi-hole/dnsmasq;
+- берет домены и источник запроса из DNS-логов Pi-hole/dnsmasq или live packet dump на 53 порту;
 - дозированно проверяет сайты напрямую и через SOCKS/HTTP proxy v2rayA;
 - показывает простой UI через `uhttpd` CGI;
 - фильтрует и сканирует домены конкретного устройства;
@@ -26,11 +26,11 @@ SiteWatch рассчитан на два аккуратных варианта �
 
 ## Что ставить на роутер
 
-Для shell-fallback и Pi-hole API нужны:
+Для shell-fallback, Pi-hole API и DNS packet dump нужны:
 
 ```sh
 opkg update
-opkg install curl ca-bundle
+opkg install curl ca-bundle tcpdump
 ```
 
 Если Go-бинарник не установлен, сканирование использует shell-fallback через `curl`. Тогда нужен полный вариант `curl`/`libcurl` с поддержкой proxy. Проверка:
@@ -120,7 +120,7 @@ SITEWATCH_PIHOLE_DISK: "0"
 
 ### Агент на OpenWrt для контейнера
 
-Если SiteWatch работает в контейнере, а Pi-hole нет, лучше не читать лог-файлы с роутера по сети. Поставь на OpenWrt только маленький `sitewatch-agent`: он временно включает `dnsmasq logqueries`, читает `logread -f`, парсит DNS-запросы в потоке и отправляет в контейнер уже готовые пары `source/domain`.
+Если SiteWatch работает в контейнере, а Pi-hole нет, лучше не читать лог-файлы с роутера по сети. Поставь на OpenWrt только маленький `sitewatch-agent`: он временно включает `dnsmasq logqueries` и/или читает live packet dump на 53 порту, парсит DNS-запросы в потоке и отправляет в контейнер уже готовые пары `source/domain`.
 
 Сначала сгенерируй общий токен на Unraid/Linux-хосте:
 
@@ -181,7 +181,7 @@ sitewatch-agent 0
 sitewatch-agent stop
 ```
 
-Агент не пишет растущий DNS-лог на роутере: он держит только маленький статус в `/tmp/sitewatch-agent.status` и отправляет события в ingest endpoint контейнера.
+Агент не пишет растущий DNS-лог на роутере: он держит только маленький статус в `/tmp/sitewatch-agent.status` и отправляет события в ingest endpoint контейнера. Если `SITEWATCH_DNS_SOURCE=packet` или `auto` при установленном `tcpdump`, агент видит также DNS-запросы LAN-устройств к внешним DNS-серверам, не только запросы к локальному `dnsmasq`.
 
 Для Prometheus в контейнере и на OpenWrt доступен scrape endpoint:
 
@@ -215,6 +215,7 @@ sitewatch-reflector :8096
 sitewatch-net-probe both <reflector-host> 3478,443,50000,55000,60000,65000
 sitewatch-net-probe udp <reflector-host> 50000,55000,60000,65000
 sitewatch-net-probe tcp <reflector-host> 443,50000
+sitewatch-flow-probe 45
 ```
 
 Результаты пишутся в `SITEWATCH_NET_RESULTS` и доступны во вкладке **Диагностика**. Если TCP до reflector работает, а UDP на высоких портах стабильно `timeout`, это хороший сигнал фильтрации UDP-диапазона. Если пассивный conntrack при реальном звонке показывает много исходящих UDP-пакетов без `ASSURED`, это подозрение на деградацию/блокировку уже по реальному трафику устройства.
@@ -336,6 +337,21 @@ query[A] youmagine.com from 192.168.1.50
 
 Также используется `logread -e 'query['`, если включен `SITEWATCH_USE_LOGREAD=1`.
 
+Дополнительный DNS-источник задается так:
+
+```sh
+SITEWATCH_DNS_SOURCE="auto"
+```
+
+Доступные режимы:
+
+- `auto` - dnsmasq/logread плюс packet dump, если доступен `tcpdump`;
+- `dnsmasq` - только локальные логи dnsmasq/Pi-hole;
+- `packet` - только live packet dump на интерфейсе `SITEWATCH_DNS_DUMP_IFACE`, по умолчанию `br-lan`;
+- `both` - принудительно использовать и dnsmasq/logread, и packet dump.
+
+Packet dump не пишет постоянный лог: во время окна наблюдения используется временный `/tmp/sitewatch-dns-dump.tsv`, а сборщик переносит события в обычную таблицу наблюдений.
+
 Если Pi-hole пишет лог в другое место, поменяй:
 
 ```sh
@@ -350,7 +366,7 @@ SITEWATCH_LOG_FILES="/path/to/pihole.log /tmp/log/dnsmasq.log"
 sitewatch-capture 45
 ```
 
-Скрипт временно включает `dhcp.@dnsmasq[0].logqueries`, собирает домены каждые несколько секунд и возвращает прежнюю настройку DNS-логирования после завершения.
+Скрипт временно включает `dhcp.@dnsmasq[0].logqueries`, собирает домены каждые несколько секунд и возвращает прежнюю настройку DNS-логирования после завершения. В режиме `SITEWATCH_DNS_SOURCE=auto` при наличии `tcpdump` дополнительно запускается потоковый packet dump `udp/tcp port 53`, поэтому можно увидеть устройства, которые обходят локальный DNS.
 
 Запуск без таймера:
 

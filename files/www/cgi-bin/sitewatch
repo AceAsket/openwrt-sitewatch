@@ -14,6 +14,8 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_USE_LOGREAD:=1}"
 : "${SITEWATCH_CLEAR_LOGREAD:=1}"
 : "${SITEWATCH_DNSMASQ_CONTROL:=1}"
+: "${SITEWATCH_DNS_SOURCE:=auto}"
+: "${SITEWATCH_DNS_DUMP_BIN:=/usr/bin/sitewatch-dns-dump}"
 : "${SITEWATCH_RUN_MODE:=native}"
 : "${SITEWATCH_INGEST_TOKEN:=}"
 : "${SITEWATCH_GO_BIN:=/usr/bin/sitewatch}"
@@ -609,6 +611,10 @@ probe_mode="$(safe_token "$(param probe_mode)")"
 case "$probe_mode" in udp|tcp|both) ;; *) probe_mode="$SITEWATCH_PROBE_MODE" ;; esac
 probe_ports="$(printf "%s" "$(safe_token "$(param probe_ports)")" | sed 's/[^0-9,]//g')"
 [ -n "$probe_ports" ] || probe_ports="$SITEWATCH_PROBE_PORTS"
+flow_duration="$(normalize_int_range "$(safe_token "$(param flow_duration)")" 0 300 45)"
+dns_source="$(safe_token "$(param dns_source)")"
+case "$dns_source" in auto|dnsmasq|packet|both) ;; *) dns_source="$SITEWATCH_DNS_SOURCE" ;; esac
+case "$dns_source" in auto|dnsmasq|packet|both) ;; *) dns_source="auto" ;; esac
 scan_workers="$(normalize_scan_workers "$(safe_token "$(param scan_workers)")")"
 [ -n "$scan_workers" ] || scan_workers="$(normalize_scan_workers "$SITEWATCH_SCAN_WORKERS")"
 [ -n "$scan_workers" ] || scan_workers=4
@@ -666,7 +672,7 @@ case "$action" in
 		redirect_clean diagnostics
 		;;
 	flow_probe)
-		"$SITEWATCH_FLOW_PROBE_BIN" >/dev/null 2>&1 || true
+		"$SITEWATCH_FLOW_PROBE_BIN" "$flow_duration" >/dev/null 2>&1 || true
 		redirect_clean diagnostics
 		;;
 	save_settings)
@@ -684,6 +690,7 @@ case "$action" in
 		save_config_value SITEWATCH_PROBE_TARGET "$probe_target"
 		save_config_value SITEWATCH_PROBE_MODE "$probe_mode"
 		save_config_value SITEWATCH_PROBE_PORTS "$probe_ports"
+		save_config_value SITEWATCH_DNS_SOURCE "$dns_source"
 		SITEWATCH_RUN_MODE="$run_mode"
 		SITEWATCH_RETENTION_DAYS="$retention_days"
 		SITEWATCH_AGENT_INGEST_URL="$agent_ingest_url"
@@ -697,6 +704,7 @@ case "$action" in
 		SITEWATCH_PROBE_TARGET="$probe_target"
 		SITEWATCH_PROBE_MODE="$probe_mode"
 		SITEWATCH_PROBE_PORTS="$probe_ports"
+		SITEWATCH_DNS_SOURCE="$dns_source"
 		active_capture_bin="$SITEWATCH_CAPTURE_BIN"
 		active_capture_status="$SITEWATCH_CAPTURE_STATUS"
 		if [ "$SITEWATCH_RUN_MODE" = "agent" ]; then
@@ -998,6 +1006,24 @@ case "$SITEWATCH_PROBE_MODE" in
 	tcp) probe_tcp_selected="selected" ;;
 	*) probe_both_selected="selected" ;;
 esac
+dns_source_auto_selected=""
+dns_source_dnsmasq_selected=""
+dns_source_packet_selected=""
+dns_source_both_selected=""
+case "$SITEWATCH_DNS_SOURCE" in
+	dnsmasq) dns_source_dnsmasq_selected="selected" ;;
+	packet) dns_source_packet_selected="selected" ;;
+	both) dns_source_both_selected="selected" ;;
+	*) dns_source_auto_selected="selected" ;;
+esac
+if [ -x "$SITEWATCH_DNS_DUMP_BIN" ] && command -v tcpdump >/dev/null 2>&1; then
+	packet_dns_label="packet dump доступен"
+	packet_dns_state="ok"
+else
+	packet_dns_label="tcpdump не найден"
+	packet_dns_state="warn"
+fi
+packet_dns_label_e="$(printf "%s" "$packet_dns_label" | html_escape)"
 body_mode_class=""
 [ "$SITEWATCH_RUN_MODE" = "agent" ] && body_mode_class="mode-agent"
 
@@ -1439,6 +1465,7 @@ cat <<EOF
 <div class="diag-item"><span class="diag-state $mode_state">mode</span><b>$mode_label_e</b><small>$mode_hint_e</small></div>
 <div class="diag-item"><span class="diag-state $([ "$SITEWATCH_DNSMASQ_CONTROL" = "1" ] && echo ok || echo off)">dnsmasq</span><b>$dnsmasq_control_label_e</b><small>logging: $dns_logging</small></div>
 <div class="diag-item"><span class="diag-state $logread_state">logread</span><b>$logread_label_e</b><small>файлы логов ниже</small></div>
+<div class="diag-item"><span class="diag-state $packet_dns_state">packet</span><b>$packet_dns_label_e</b><small>source: $SITEWATCH_DNS_SOURCE</small></div>
 <div class="diag-item"><span class="diag-state $go_state">scan</span><b>$go_label_e</b><small>proxy: $proxy_label_e</small></div>
 </section>
 <div class="source-panel">
@@ -1483,7 +1510,12 @@ cat <<EOF
 </label>
 <label>Порты <input type="text" name="probe_ports" value="$probe_ports_e" placeholder="3478,443,50000,55000,60000,65000"></label>
 <button class="button primary" type="submit">Активная проверка</button>
-<a class="button" href="?action=flow_probe&tab=diagnostics">Пассивный conntrack</a>
+</form>
+<form class="settings-form" method="get" action="">
+<input type="hidden" name="action" value="flow_probe">
+<input type="hidden" name="tab" value="diagnostics">
+<label>Окно conntrack, сек <input type="number" name="flow_duration" min="0" max="300" step="5" value="45"></label>
+<button class="button" type="submit">Пассивно наблюдать</button>
 </form>
 <div class="utility-grid" style="margin-top:12px">
 <div class="source-panel">
@@ -1519,6 +1551,7 @@ $agent_ingest_card_html
 <div class="source-card agent-hidden"><b>Потоков распознавания</b><div class="muted">$scan_workers_e</div></div>
 <div class="source-card agent-hidden"><b>dnsmasq control</b><div class="muted">$dnsmasq_control_label_e</div></div>
 <div class="source-card agent-hidden"><b>logread</b><div class="muted">$logread_label_e</div></div>
+<div class="source-card"><b>DNS packet dump</b><div class="muted">$packet_dns_label_e</div></div>
 <div class="source-card agent-hidden"><b>Pi-hole API</b><div class="muted">$pihole_label_e</div></div>
 <div class="source-card agent-hidden"><b>Prometheus</b><div class="muted">$metrics_path_e</div></div>
 </div>
@@ -1535,6 +1568,14 @@ $agent_ingest_input_html
 <label>Ingest token <input type="password" name="ingest_token" value="$ingest_token_e" placeholder="общий токен"></label>
 <label class="agent-hidden">Потоков распознавания <input type="number" name="scan_workers" min="1" max="16" step="1" value="$scan_workers_e"></label>
 <label class="agent-hidden">Хранить дней <input type="number" name="retention_days" min="1" max="365" step="1" value="$retention_days_e"></label>
+<label>DNS-источник
+<select name="dns_source">
+<option value="auto" $dns_source_auto_selected>Авто: dnsmasq + packet dump если доступен</option>
+<option value="dnsmasq" $dns_source_dnsmasq_selected>Только dnsmasq/logread</option>
+<option value="packet" $dns_source_packet_selected>Только packet dump</option>
+<option value="both" $dns_source_both_selected>dnsmasq + packet dump</option>
+</select>
+</label>
 <label class="agent-hidden">Pi-hole API
 <select name="pihole_enabled">
 <option value="0" $pihole_disabled_selected>Выключен</option>

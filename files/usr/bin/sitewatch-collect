@@ -9,6 +9,7 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_LOG_LINES:=300}"
 : "${SITEWATCH_LOG_FILES:=/var/log/pihole/pihole.log /tmp/log/dnsmasq.log /var/log/messages}"
 : "${SITEWATCH_USE_LOGREAD:=1}"
+: "${SITEWATCH_DNS_DUMP_EVENTS:=/tmp/sitewatch-dns-dump.tsv}"
 : "${SITEWATCH_PIHOLE_API_ENABLED:=0}"
 : "${SITEWATCH_PIHOLE_URL:=}"
 : "${SITEWATCH_PIHOLE_PASSWORD:=}"
@@ -23,6 +24,13 @@ touch "$SITEWATCH_QUEUE" "$SITEWATCH_SEEN"
 tmp="/tmp/sitewatch-collect.$$"
 trap 'rm -f "$tmp" "$tmp.new" /tmp/sitewatch-pihole-parsed.$$' EXIT
 : > "$tmp"
+
+if [ -r "$SITEWATCH_DNS_DUMP_EVENTS" ]; then
+	tail -n "$SITEWATCH_LOG_LINES" "$SITEWATCH_DNS_DUMP_EVENTS" 2>/dev/null | awk -F '\t' '
+		NF >= 2 && $1 !~ /^127\./ && $1 != "::1" { print $1 "\t" $2 }
+	' >> "$tmp"
+	: > "$SITEWATCH_DNS_DUMP_EVENTS" 2>/dev/null || true
+fi
 
 for log in $SITEWATCH_LOG_FILES; do
 	[ -r "$log" ] || continue

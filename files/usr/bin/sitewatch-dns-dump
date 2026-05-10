@@ -1,0 +1,117 @@
+#!/bin/ash
+set -eu
+
+CONF="/etc/sitewatch/sitewatch.conf"
+[ -f "$CONF" ] && . "$CONF"
+
+: "${SITEWATCH_DNS_DUMP_IFACE:=br-lan}"
+: "${SITEWATCH_DNS_DUMP_EVENTS:=/tmp/sitewatch-dns-dump.tsv}"
+: "${SITEWATCH_AGENT_INGEST_URL:=}"
+: "${SITEWATCH_INGEST_TOKEN:=}"
+
+mode="${1:-stdout}"
+duration="${2:-0}"
+case "$duration" in
+	""|*[!0-9]*) duration=0 ;;
+esac
+[ "$duration" -gt 3600 ] && duration=3600
+
+normalize_container_addr() {
+	value="$(printf "%s" "$1" | sed 's/[[:space:]]//g')"
+	value="${value#http://}"
+	value="${value#https://}"
+	value="${value%%/*}"
+	value="${value%%\?*}"
+	value="${value%%#*}"
+	printf "%s" "$value"
+}
+
+valid_domain() {
+	domain="$(printf "%s" "$1" | sed 's/\.$//' | tr 'A-Z' 'a-z')"
+	case "$domain" in
+		""|.*|*.local|*.lan|*.arpa|_*|*[^a-z0-9.-]*) return 1 ;;
+	esac
+	case "$domain" in
+		*.*) printf "%s" "$domain" ;;
+		*) return 1 ;;
+	esac
+}
+
+is_lan_source() {
+	case "$1" in
+		10.*|192.168.*|172.16.*|172.17.*|172.18.*|172.19.*|172.2[0-9].*|172.30.*|172.31.*|fd*|fe80:*) return 0 ;;
+	esac
+	return 1
+}
+
+emit_event() {
+	source="$1"
+	domain="$(valid_domain "$2" 2>/dev/null || true)"
+	ts="$(date +%s)"
+	[ -n "$source" ] && [ -n "$domain" ] || return 0
+	case "$source" in 127.*|::1) return 0 ;; esac
+	is_lan_source "$source" || return 0
+	case "$mode" in
+		local)
+			mkdir -p "$(dirname "$SITEWATCH_DNS_DUMP_EVENTS")"
+			printf "%s\t%s\n" "$source" "$domain" >> "$SITEWATCH_DNS_DUMP_EVENTS"
+			;;
+		ingest)
+			target="$(normalize_container_addr "$SITEWATCH_AGENT_INGEST_URL")"
+			[ -n "$target" ] || return 0
+			url="http://${target}/cgi-bin/sitewatch?action=ingest&source=${source}&domain=${domain}&ts=${ts}"
+			[ -n "$SITEWATCH_INGEST_TOKEN" ] && url="${url}&token=${SITEWATCH_INGEST_TOKEN}"
+			wget -q -O - "$url" >/dev/null 2>&1 || true
+			;;
+		*)
+			printf "%s\t%s\n" "$source" "$domain"
+			;;
+	esac
+}
+
+if ! command -v tcpdump >/dev/null 2>&1; then
+	echo "tcpdump is required" >&2
+	exit 2
+fi
+
+fifo="/tmp/sitewatch-dns-dump.$$"
+tcpdump_pid=""
+trap 'kill "$tcpdump_pid" 2>/dev/null || true; rm -f "$fifo"' EXIT INT TERM
+mkfifo "$fifo"
+
+tcpdump -l -n -i "$SITEWATCH_DNS_DUMP_IFACE" '(udp port 53 or tcp port 53)' > "$fifo" 2>/dev/null &
+tcpdump_pid="$!"
+exec 3< "$fifo"
+
+start_ts="$(date +%s)"
+while :; do
+	line=""
+	if read -r -t 1 line <&3; then
+		event="$(printf "%s\n" "$line" | awk '
+			/[?][[:space:]]+[A-Za-z0-9.-]+\./ {
+				source = "";
+				domain = "";
+				for (i = 1; i <= NF; i++) {
+					if ($i == ">") {
+						source = $(i - 1);
+						sub(/\.[0-9]+$/, "", source);
+					}
+					if ($i ~ /\?$/ && (i + 1) <= NF) {
+						domain = $(i + 1);
+						sub(/\.$/, "", domain);
+					}
+				}
+				if (source != "" && domain != "") print source "\t" domain;
+			}
+		')"
+		if [ -n "$event" ]; then
+			source="${event%%	*}"
+			domain="${event#*	}"
+			emit_event "$source" "$domain"
+		fi
+	fi
+	if [ "$duration" != "0" ]; then
+		now="$(date +%s)"
+		[ $((now - start_ts)) -ge "$duration" ] && break
+	fi
+done

@@ -76,7 +76,11 @@ rm -f \
 	/usr/bin/sitewatch-capture \
 	/usr/bin/sitewatch-agent \
 	/usr/bin/sitewatch-scan \
-	/usr/bin/sitewatch-check-url
+	/usr/bin/sitewatch-check-url \
+	/usr/bin/sitewatch-dns-dump \
+	/usr/bin/sitewatch-flow-probe \
+	/usr/bin/sitewatch-net-probe \
+	/usr/bin/sitewatch-reflector
 
 rm -rf /www/sitewatch
 rm -f \
@@ -86,7 +90,8 @@ rm -f \
 	/tmp/sitewatch-agent.stop \
 	/tmp/sitewatch-agent.pid \
 	/tmp/sitewatch-scan.status \
-	/tmp/sitewatch-pihole.status
+	/tmp/sitewatch-pihole.status \
+	/tmp/sitewatch-dns-dump.tsv
 rm -rf \
 	/tmp/sitewatch-capture.lock \
 	/tmp/sitewatch-scan.lock
