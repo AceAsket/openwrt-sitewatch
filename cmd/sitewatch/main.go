@@ -33,10 +33,17 @@ type config struct {
 	Lock            string
 	ScanStatus      string
 	CaptureStatus   string
+	CaptureLock     string
+	CaptureStop     string
+	CollectBin      string
+	CollectInterval time.Duration
+	DNSmasqControl  bool
+	DNSSource       string
 	DetectorStatus  string
 	DetectorHistory string
 	DetectorBin     string
 	FlowProbeBin    string
+	DNSDumpBin      string
 	DNSDumpIface    string
 	DNSDumpEvents   string
 	AgentIngestURL  string
@@ -213,6 +220,8 @@ func main() {
 		err = cmdCheckURL(cfg, os.Args[2:])
 	case "scan":
 		err = cmdScan(cfg)
+	case "capture":
+		err = cmdCapture(cfg, os.Args[2:])
 	case "probe":
 		err = cmdProbe(cfg, os.Args[2:])
 	case "reflector":
@@ -238,6 +247,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: sitewatch check-url [--add] <url>")
 	fmt.Fprintln(os.Stderr, "       sitewatch scan")
+	fmt.Fprintln(os.Stderr, "       sitewatch capture [duration|stop]")
 	fmt.Fprintln(os.Stderr, "       sitewatch probe [udp|tcp|both] host:port[,port...]")
 	fmt.Fprintln(os.Stderr, "       sitewatch reflector [listen]")
 	fmt.Fprintln(os.Stderr, "       sitewatch serve [listen]")
@@ -266,10 +276,17 @@ func loadConfig() config {
 		Lock:            getStr(values, "SITEWATCH_LOCK", "/tmp/sitewatch-scan.lock"),
 		ScanStatus:      getStr(values, "SITEWATCH_SCAN_STATUS", "/tmp/sitewatch-scan.status"),
 		CaptureStatus:   getStr(values, "SITEWATCH_CAPTURE_STATUS", "/tmp/sitewatch-capture.status"),
+		CaptureLock:     getStr(values, "SITEWATCH_CAPTURE_LOCK", "/tmp/sitewatch-capture.lock"),
+		CaptureStop:     getStr(values, "SITEWATCH_CAPTURE_STOP", "/tmp/sitewatch-capture.stop"),
+		CollectBin:      getStr(values, "SITEWATCH_COLLECT_BIN", "/usr/bin/sitewatch-collect"),
+		CollectInterval: time.Duration(getInt(values, "SITEWATCH_CAPTURE_COLLECT_INTERVAL", 5)) * time.Second,
+		DNSmasqControl:  getStr(values, "SITEWATCH_DNSMASQ_CONTROL", "1") == "1",
+		DNSSource:       getStr(values, "SITEWATCH_DNS_SOURCE", "auto"),
 		DetectorStatus:  getStr(values, "SITEWATCH_DETECTOR_STATUS", "/tmp/sitewatch-detector.status"),
 		DetectorHistory: getStr(values, "SITEWATCH_DETECTOR_HISTORY", "/etc/sitewatch/detector-history.tsv"),
 		DetectorBin:     getStr(values, "SITEWATCH_DETECTOR_BIN", "/usr/bin/sitewatch"),
 		FlowProbeBin:    getStr(values, "SITEWATCH_FLOW_PROBE_BIN", "/usr/bin/sitewatch-flow-probe"),
+		DNSDumpBin:      getStr(values, "SITEWATCH_DNS_DUMP_BIN", "/usr/bin/sitewatch-dns-dump"),
 		DNSDumpIface:    getStr(values, "SITEWATCH_DNS_DUMP_IFACE", "br-lan"),
 		DNSDumpEvents:   getStr(values, "SITEWATCH_DNS_DUMP_EVENTS", "/tmp/sitewatch-dns-dump.tsv"),
 		AgentIngestURL:  getStr(values, "SITEWATCH_AGENT_INGEST_URL", ""),
@@ -602,6 +619,191 @@ func cmdScan(cfg config) error {
 	}
 	writeScanStatus(cfg, "done", now, len(domains), len(domains), "")
 	return nil
+}
+
+func cmdCapture(cfg config, args []string) error {
+	duration, stop := parseCaptureDuration(args)
+	now := time.Now().Unix()
+	if stop {
+		writeCaptureStatus(cfg, "stopped", now, 0)
+		_ = touchFile(cfg.CaptureStop)
+		return nil
+	}
+	if cfg.CollectInterval <= 0 {
+		cfg.CollectInterval = 5 * time.Second
+	}
+	if err := os.Mkdir(cfg.CaptureLock, 0o755); err != nil {
+		if os.IsExist(err) {
+			fmt.Println("capture already running")
+			return nil
+		}
+		return err
+	}
+
+	dnsSource := normalizeDNSSource(cfg.DNSSource)
+	useDNSmasq, usePacket := captureSources(cfg, dnsSource)
+	prev, controlEnabled := captureDNSmasqState(cfg, useDNSmasq)
+	var dnsDump *exec.Cmd
+	cleanup := func() {
+		if dnsDump != nil && dnsDump.Process != nil {
+			_ = dnsDump.Process.Kill()
+			_, _ = dnsDump.Process.Wait()
+		}
+		if controlEnabled {
+			restoreDNSmasqLogging(prev)
+		}
+		_ = os.RemoveAll(cfg.CaptureLock)
+		_ = os.Remove(cfg.CaptureStop)
+	}
+	defer cleanup()
+
+	writeCaptureStatus(cfg, "running", now, duration)
+	if controlEnabled {
+		enableDNSmasqLogging()
+	}
+	if usePacket && cfg.DNSDumpBin != "" {
+		_ = os.WriteFile(cfg.DNSDumpEvents, nil, 0o644)
+		dnsDump = exec.Command(cfg.DNSDumpBin, "local", "0")
+		dnsDump.Stdout = io.Discard
+		dnsDump.Stderr = io.Discard
+		if err := dnsDump.Start(); err != nil {
+			dnsDump = nil
+		}
+	}
+
+	for {
+		time.Sleep(cfg.CollectInterval)
+		_ = runOptionalCommand(cfg.CollectBin)
+		last := time.Now().Unix()
+		writeCaptureStatus(cfg, "running", now, duration)
+		if fileExists(cfg.CaptureStop) {
+			writeCaptureStatus(cfg, "stopped", last, duration)
+			return nil
+		}
+		if duration > 0 && last-now >= int64(duration) {
+			writeCaptureStatus(cfg, "done", last, duration)
+			return nil
+		}
+	}
+}
+
+func parseCaptureDuration(args []string) (int, bool) {
+	raw := "45"
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		raw = strings.TrimSpace(args[0])
+	}
+	if raw == "stop" {
+		return 0, true
+	}
+	duration := parseInt(raw)
+	if duration <= 0 && raw != "0" {
+		duration = 45
+	}
+	if duration != 0 {
+		if duration < 5 {
+			duration = 5
+		}
+		if duration > 600 {
+			duration = 600
+		}
+	}
+	return duration, false
+}
+
+func normalizeDNSSource(source string) string {
+	switch source {
+	case "dnsmasq", "packet", "both", "auto":
+		return source
+	default:
+		return "auto"
+	}
+}
+
+func captureSources(cfg config, source string) (bool, bool) {
+	switch source {
+	case "dnsmasq":
+		return true, false
+	case "packet":
+		return false, true
+	case "both":
+		return true, true
+	default:
+		_, tcpdumpOK := exec.LookPath("tcpdump")
+		return true, cfg.DNSDumpBin != "" && tcpdumpOK == nil
+	}
+}
+
+func captureDNSmasqState(cfg config, useDNSmasq bool) (string, bool) {
+	if !cfg.DNSmasqControl || !useDNSmasq || !commandExists("uci") || !fileExecutable("/etc/init.d/dnsmasq") {
+		return "__absent__", false
+	}
+	out, err := exec.Command("uci", "-q", "get", "dhcp.@dnsmasq[0].logqueries").Output()
+	if err != nil {
+		return "__absent__", true
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+func enableDNSmasqLogging() {
+	_ = exec.Command("uci", "set", "dhcp.@dnsmasq[0].logqueries=1").Run()
+	_ = exec.Command("uci", "commit", "dhcp").Run()
+	_ = exec.Command("/etc/init.d/dnsmasq", "restart").Run()
+}
+
+func restoreDNSmasqLogging(prev string) {
+	if prev == "__absent__" {
+		_ = exec.Command("uci", "-q", "delete", "dhcp.@dnsmasq[0].logqueries").Run()
+	} else {
+		_ = exec.Command("uci", "set", "dhcp.@dnsmasq[0].logqueries="+prev).Run()
+	}
+	_ = exec.Command("uci", "commit", "dhcp").Run()
+	_ = exec.Command("/etc/init.d/dnsmasq", "restart").Run()
+}
+
+func writeCaptureStatus(cfg config, state string, started int64, duration int) {
+	if cfg.CaptureStatus == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(cfg.CaptureStatus), 0o755)
+	line := fmt.Sprintf("%s\t%d\t%d\t%d\n", state, started, duration, time.Now().Unix())
+	_ = os.WriteFile(cfg.CaptureStatus, []byte(line), 0o644)
+}
+
+func runOptionalCommand(path string, args ...string) error {
+	if path == "" {
+		return nil
+	}
+	cmd := exec.Command(path, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run()
+}
+
+func touchFile(path string) error {
+	if path == "" {
+		return nil
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func commandExists(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func fileExecutable(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }
 
 func cmdProbe(cfg config, args []string) error {

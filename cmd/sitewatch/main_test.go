@@ -104,6 +104,36 @@ func TestBuildAPIStatusAndDomainRows(t *testing.T) {
 	}
 }
 
+func TestParseCaptureDuration(t *testing.T) {
+	tests := []struct {
+		args     []string
+		duration int
+		stop     bool
+	}{
+		{nil, 45, false},
+		{[]string{"stop"}, 0, true},
+		{[]string{"0"}, 0, false},
+		{[]string{"2"}, 5, false},
+		{[]string{"900"}, 600, false},
+		{[]string{"bad"}, 45, false},
+	}
+	for _, tt := range tests {
+		duration, stop := parseCaptureDuration(tt.args)
+		if duration != tt.duration || stop != tt.stop {
+			t.Fatalf("parseCaptureDuration(%v) = (%d, %v), want (%d, %v)", tt.args, duration, stop, tt.duration, tt.stop)
+		}
+	}
+}
+
+func TestNormalizeDNSSource(t *testing.T) {
+	if got := normalizeDNSSource("packet"); got != "packet" {
+		t.Fatalf("normalizeDNSSource(packet) = %q", got)
+	}
+	if got := normalizeDNSSource("weird"); got != "auto" {
+		t.Fatalf("normalizeDNSSource(weird) = %q", got)
+	}
+}
+
 func TestReadFlowEntriesAndDetectorHistory(t *testing.T) {
 	dir := t.TempDir()
 	flow := filepath.Join(dir, "flow.tsv")

@@ -583,3 +583,4 @@ domain(domain: shikimori.org) -> proxy
 ```
 
 `export_base` и `export_v2raya_base` предварительно сворачивают поддомены до базового домена, например `static2.mangapoisk.io` -> `mangapoisk.io`.
+`sitewatch-capture` оставлен как совместимая обертка; запуск окна наблюдения, stop-файл, статус, временное управление dnsmasq logging и packet dump теперь выполняет Go-команда `sitewatch capture`.
