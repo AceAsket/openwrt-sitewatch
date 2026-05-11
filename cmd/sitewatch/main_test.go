@@ -164,6 +164,37 @@ func TestParseConntrackLineAndDiff(t *testing.T) {
 	}
 }
 
+func TestParseTCPDumpDNSLine(t *testing.T) {
+	line := "16:03:12.123456 IP 192.168.50.80.54839 > 8.8.8.8.53: 12345+ A? YouMagine.COM. (29)"
+	event, ok := parseTCPDumpDNSLine(line)
+	if !ok {
+		t.Fatalf("parseTCPDumpDNSLine() rejected sample")
+	}
+	if event.Source != "192.168.50.80" || event.Domain != "youmagine.com" {
+		t.Fatalf("event = %+v", event)
+	}
+}
+
+func TestParseTCPDumpDNSLineRejectsNoise(t *testing.T) {
+	tests := []string{
+		"16:03:12 IP 127.0.0.1.12345 > 8.8.8.8.53: 1+ A? example.com. (29)",
+		"16:03:12 IP 192.168.50.80.12345 > 8.8.8.8.53: 1+ PTR? 1.168.192.in-addr.arpa. (29)",
+		"16:03:12 IP 1.2.3.4.12345 > 8.8.8.8.53: 1+ A? example.com. (29)",
+	}
+	for _, tt := range tests {
+		if event, ok := parseTCPDumpDNSLine(tt); ok {
+			t.Fatalf("parseTCPDumpDNSLine(%q) = %+v, want reject", tt, event)
+		}
+	}
+}
+
+func TestNormalizeContainerAddr(t *testing.T) {
+	got := normalizeContainerAddr(" https://192.168.50.50:8095/cgi-bin/sitewatch?action=x ")
+	if got != "192.168.50.50:8095" {
+		t.Fatalf("normalizeContainerAddr() = %q", got)
+	}
+}
+
 func TestDetectorCommandArgsSupportsWrapper(t *testing.T) {
 	args := []string{"quick"}
 	if got := detectorCommandArgs(config{DetectorBin: "/usr/bin/sitewatch"}, args); len(got) != 2 || got[0] != "detector" {

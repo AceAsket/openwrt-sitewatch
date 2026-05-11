@@ -37,6 +37,10 @@ type config struct {
 	DetectorHistory string
 	DetectorBin     string
 	FlowProbeBin    string
+	DNSDumpIface    string
+	DNSDumpEvents   string
+	AgentIngestURL  string
+	IngestToken     string
 	FlowUDPPorts    []portRange
 	FlowTCPPorts    []portRange
 	Proxy           string
@@ -219,6 +223,8 @@ func main() {
 		err = cmdDetector(cfg, os.Args[2:])
 	case "flow-probe":
 		err = cmdFlowProbe(cfg, os.Args[2:])
+	case "dns-dump":
+		err = cmdDNSDump(cfg, os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -237,6 +243,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       sitewatch serve [listen]")
 	fmt.Fprintln(os.Stderr, "       sitewatch detector [quick|site|discord|full] [url] [target] [ports] [duration] [source]")
 	fmt.Fprintln(os.Stderr, "       sitewatch flow-probe [duration]")
+	fmt.Fprintln(os.Stderr, "       sitewatch dns-dump [stdout|local|ingest] [duration]")
 }
 
 func loadConfig() config {
@@ -263,6 +270,10 @@ func loadConfig() config {
 		DetectorHistory: getStr(values, "SITEWATCH_DETECTOR_HISTORY", "/etc/sitewatch/detector-history.tsv"),
 		DetectorBin:     getStr(values, "SITEWATCH_DETECTOR_BIN", "/usr/bin/sitewatch"),
 		FlowProbeBin:    getStr(values, "SITEWATCH_FLOW_PROBE_BIN", "/usr/bin/sitewatch-flow-probe"),
+		DNSDumpIface:    getStr(values, "SITEWATCH_DNS_DUMP_IFACE", "br-lan"),
+		DNSDumpEvents:   getStr(values, "SITEWATCH_DNS_DUMP_EVENTS", "/tmp/sitewatch-dns-dump.tsv"),
+		AgentIngestURL:  getStr(values, "SITEWATCH_AGENT_INGEST_URL", ""),
+		IngestToken:     getStr(values, "SITEWATCH_INGEST_TOKEN", ""),
 		FlowUDPPorts:    parsePortRanges(getStr(values, "SITEWATCH_FLOW_UDP_PORTS", "50000-65535 3478 443")),
 		FlowTCPPorts:    parsePortRanges(getStr(values, "SITEWATCH_FLOW_TCP_PORTS", "443 50000-65535")),
 		Proxy:           getStr(values, "SITEWATCH_PROXY", "socks5h://127.0.0.1:20170"),
@@ -785,6 +796,184 @@ func cmdFlowProbe(cfg config, args []string) error {
 
 	rows := diffFlowSnapshots(start, end, duration, time.Now().Unix())
 	return appendFlowResults(cfg.FlowResults, rows)
+}
+
+func cmdDNSDump(cfg config, args []string) error {
+	mode := "stdout"
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		mode = strings.TrimSpace(args[0])
+	}
+	switch mode {
+	case "stdout", "local", "ingest":
+	default:
+		mode = "stdout"
+	}
+	duration := 0
+	if len(args) > 1 && strings.TrimSpace(args[1]) != "" {
+		duration = parseInt(args[1])
+	}
+	if duration < 0 {
+		duration = 0
+	}
+	if duration > 3600 {
+		duration = 3600
+	}
+	tcpdumpPath, err := exec.LookPath("tcpdump")
+	if err != nil {
+		return errors.New("tcpdump is required")
+	}
+
+	ctx := context.Background()
+	cancel := func() {}
+	if duration > 0 {
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(duration)*time.Second)
+	}
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, tcpdumpPath, "-l", "-n", "-i", cfg.DNSDumpIface, "(udp port 53 or tcp port 53)")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		event, ok := parseTCPDumpDNSLine(scanner.Text())
+		if !ok {
+			continue
+		}
+		if err := emitDNSEvent(cfg, mode, event); err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return err
+	}
+	err = cmd.Wait()
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
+}
+
+type dnsDumpEvent struct {
+	Source string
+	Domain string
+	TS     int64
+}
+
+func parseTCPDumpDNSLine(line string) (dnsDumpEvent, bool) {
+	fields := strings.Fields(line)
+	source := ""
+	domain := ""
+	for i, field := range fields {
+		if field == ">" && i > 0 {
+			source = stripTCPDumpPort(fields[i-1])
+		}
+		if strings.HasSuffix(field, "?") && i+1 < len(fields) {
+			domain = cleanDNSDomain(fields[i+1])
+		}
+	}
+	if source == "" || domain == "" || !isLANIP(source) || source == "127.0.0.1" || source == "::1" {
+		return dnsDumpEvent{}, false
+	}
+	return dnsDumpEvent{Source: source, Domain: domain, TS: time.Now().Unix()}, true
+}
+
+func stripTCPDumpPort(addr string) string {
+	addr = strings.TrimRight(addr, ":")
+	idx := strings.LastIndex(addr, ".")
+	if idx < 0 {
+		return addr
+	}
+	if _, err := strconv.Atoi(addr[idx+1:]); err != nil {
+		return addr
+	}
+	return addr[:idx]
+}
+
+func cleanDNSDomain(domain string) string {
+	domain = strings.ToLower(strings.TrimSpace(strings.TrimRight(domain, ".")))
+	switch {
+	case domain == "",
+		strings.HasPrefix(domain, "."),
+		strings.HasSuffix(domain, ".local"),
+		strings.HasSuffix(domain, ".lan"),
+		strings.HasSuffix(domain, ".arpa"),
+		strings.HasPrefix(domain, "_"),
+		!strings.Contains(domain, "."):
+		return ""
+	}
+	for _, r := range domain {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
+			continue
+		}
+		return ""
+	}
+	return domain
+}
+
+func emitDNSEvent(cfg config, mode string, event dnsDumpEvent) error {
+	switch mode {
+	case "local":
+		if err := os.MkdirAll(filepath.Dir(cfg.DNSDumpEvents), 0o755); err != nil {
+			return err
+		}
+		file, err := os.OpenFile(cfg.DNSDumpEvents, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		_, err = fmt.Fprintf(file, "%s\t%s\n", cleanTSVField(event.Source), cleanTSVField(event.Domain))
+		return err
+	case "ingest":
+		target := normalizeContainerAddr(cfg.AgentIngestURL)
+		if target == "" {
+			return nil
+		}
+		values := url.Values{}
+		values.Set("action", "ingest")
+		values.Set("source", event.Source)
+		values.Set("domain", event.Domain)
+		values.Set("ts", strconv.FormatInt(event.TS, 10))
+		if cfg.IngestToken != "" {
+			values.Set("token", cfg.IngestToken)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+target+"/cgi-bin/sitewatch?"+values.Encode(), nil)
+		if err != nil {
+			return nil
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil
+		}
+		_ = resp.Body.Close()
+		return nil
+	default:
+		_, err := fmt.Fprintf(os.Stdout, "%s\t%s\n", event.Source, event.Domain)
+		return err
+	}
+}
+
+func normalizeContainerAddr(value string) string {
+	value = strings.Join(strings.Fields(value), "")
+	value = strings.TrimPrefix(value, "http://")
+	value = strings.TrimPrefix(value, "https://")
+	for _, sep := range []string{"/", "?", "#"} {
+		if idx := strings.Index(value, sep); idx >= 0 {
+			value = value[:idx]
+		}
+	}
+	return value
 }
 
 func readConntrackSnapshot(cfg config) ([]conntrackFlow, error) {
