@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -27,9 +28,14 @@ type config struct {
 	Queue           string
 	Results         string
 	NetResults      string
+	FlowResults     string
 	ProxyOut        string
 	Lock            string
 	ScanStatus      string
+	CaptureStatus   string
+	DetectorStatus  string
+	DetectorHistory string
+	DetectorBin     string
 	Proxy           string
 	Batch           int
 	Workers         int
@@ -112,6 +118,52 @@ type resultEntry struct {
 	DPIStatus  string
 }
 
+type apiStatus struct {
+	Capture  string `json:"capture"`
+	Scan     string `json:"scan"`
+	Detector string `json:"detector"`
+	Seen     int    `json:"seen"`
+	Results  int    `json:"results"`
+	Pending  int    `json:"pending"`
+	Proxy    int    `json:"proxy"`
+}
+
+type apiDomainRow struct {
+	Status     string `json:"status"`
+	Domain     string `json:"domain"`
+	Source     string `json:"source"`
+	Queries    int    `json:"queries"`
+	DirectCode string `json:"direct_code,omitempty"`
+	DirectTime string `json:"direct_time,omitempty"`
+	ProxyCode  string `json:"proxy_code,omitempty"`
+	ProxyTime  string `json:"proxy_time,omitempty"`
+	DPI        string `json:"dpi,omitempty"`
+	Scanned    int64  `json:"scanned,omitempty"`
+}
+
+type flowEntry struct {
+	Time    int64  `json:"time"`
+	Mode    string `json:"mode"`
+	Source  string `json:"source"`
+	Target  string `json:"target"`
+	Port    string `json:"port"`
+	Status  string `json:"status"`
+	Packets int    `json:"packets"`
+	Bytes   int    `json:"bytes"`
+	Detail  string `json:"detail"`
+}
+
+type detectorHistoryEntry struct {
+	RunID   string `json:"run_id"`
+	Time    int64  `json:"time"`
+	Profile string `json:"profile"`
+	Target  string `json:"target"`
+	Kind    string `json:"kind"`
+	Status  string `json:"status"`
+	Detail  string `json:"detail"`
+	Source  string `json:"source"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -129,6 +181,8 @@ func main() {
 		err = cmdProbe(cfg, os.Args[2:])
 	case "reflector":
 		err = cmdReflector(cfg, os.Args[2:])
+	case "serve":
+		err = cmdServe(cfg, os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -144,6 +198,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       sitewatch scan")
 	fmt.Fprintln(os.Stderr, "       sitewatch probe [udp|tcp|both] host:port[,port...]")
 	fmt.Fprintln(os.Stderr, "       sitewatch reflector [listen]")
+	fmt.Fprintln(os.Stderr, "       sitewatch serve [listen]")
 }
 
 func loadConfig() config {
@@ -161,9 +216,14 @@ func loadConfig() config {
 		Queue:           getStr(values, "SITEWATCH_QUEUE", "/etc/sitewatch/queue.tsv"),
 		Results:         getStr(values, "SITEWATCH_RESULTS", "/etc/sitewatch/results.tsv"),
 		NetResults:      getStr(values, "SITEWATCH_NET_RESULTS", "/etc/sitewatch/net-probes.tsv"),
+		FlowResults:     getStr(values, "SITEWATCH_FLOW_RESULTS", "/etc/sitewatch/flow-probes.tsv"),
 		ProxyOut:        getStr(values, "SITEWATCH_PROXY_OUT", "/etc/sitewatch/proxy-domains.txt"),
 		Lock:            getStr(values, "SITEWATCH_LOCK", "/tmp/sitewatch-scan.lock"),
 		ScanStatus:      getStr(values, "SITEWATCH_SCAN_STATUS", "/tmp/sitewatch-scan.status"),
+		CaptureStatus:   getStr(values, "SITEWATCH_CAPTURE_STATUS", "/tmp/sitewatch-capture.status"),
+		DetectorStatus:  getStr(values, "SITEWATCH_DETECTOR_STATUS", "/tmp/sitewatch-detector.status"),
+		DetectorHistory: getStr(values, "SITEWATCH_DETECTOR_HISTORY", "/etc/sitewatch/detector-history.tsv"),
+		DetectorBin:     getStr(values, "SITEWATCH_DETECTOR_BIN", "/usr/bin/sitewatch-detector"),
 		Proxy:           getStr(values, "SITEWATCH_PROXY", "socks5h://127.0.0.1:20170"),
 		Batch:           getInt(values, "SITEWATCH_BATCH", 12),
 		Workers:         getInt(values, "SITEWATCH_SCAN_WORKERS", 4),
@@ -607,6 +667,76 @@ func cmdReflector(cfg config, args []string) error {
 	go func() { errCh <- serveUDPReflector(listen) }()
 	go func() { errCh <- serveTCPReflector(listen) }()
 	return <-errCh
+}
+
+func cmdServe(cfg config, args []string) error {
+	listen := ":8095"
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		listen = args[0]
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		source := strings.TrimSpace(r.URL.Query().Get("source"))
+		status, err := buildAPIStatus(cfg, source)
+		writeJSON(w, status, err)
+	})
+	mux.HandleFunc("/api/domains", func(w http.ResponseWriter, r *http.Request) {
+		source := strings.TrimSpace(r.URL.Query().Get("source"))
+		rows, err := buildDomainRows(cfg, source, 250)
+		writeJSON(w, rows, err)
+	})
+	mux.HandleFunc("/api/network", func(w http.ResponseWriter, r *http.Request) {
+		source := strings.TrimSpace(r.URL.Query().Get("source"))
+		rows, err := readFlowEntries(cfg.FlowResults, source, 250)
+		writeJSON(w, rows, err)
+	})
+	mux.HandleFunc("/api/detector/status", func(w http.ResponseWriter, r *http.Request) {
+		raw, err := readSmallFile(cfg.DetectorStatus)
+		writeJSON(w, map[string]string{"raw": raw}, err)
+	})
+	mux.HandleFunc("/api/detector/history", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := readDetectorHistory(cfg.DetectorHistory, 100)
+		writeJSON(w, rows, err)
+	})
+	mux.HandleFunc("/api/detector/start", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writeJSON(w, nil, err)
+			return
+		}
+		args := []string{
+			cleanAPIArg(r.Form.Get("profile")),
+			cleanAPIArg(r.Form.Get("url")),
+			cleanAPIArg(r.Form.Get("target")),
+			cleanAPIArg(r.Form.Get("ports")),
+			cleanAPIArg(r.Form.Get("duration")),
+			cleanAPIArg(r.Form.Get("source")),
+		}
+		if args[0] == "" {
+			args[0] = "quick"
+		}
+		cmd := exec.Command(cfg.DetectorBin, args...)
+		if err := cmd.Start(); err != nil {
+			writeJSON(w, nil, err)
+			return
+		}
+		pid := cmd.Process.Pid
+		_ = cmd.Process.Release()
+		writeJSON(w, map[string]any{"started": true, "pid": pid}, nil)
+	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		writeMetrics(w, cfg)
+	})
+	server := &http.Server{
+		Addr:              listen,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	return server.ListenAndServe()
 }
 
 func serveUDPReflector(listen string) error {
@@ -1290,6 +1420,189 @@ func readResults(path string) (map[string]resultEntry, error) {
 	return out, scanner.Err()
 }
 
+func buildAPIStatus(cfg config, source string) (apiStatus, error) {
+	seen, err := readSeen(cfg.Queue)
+	if err != nil {
+		return apiStatus{}, err
+	}
+	results, err := readResults(cfg.Results)
+	if err != nil {
+		return apiStatus{}, err
+	}
+	proxy, err := readProxyDomains(cfg.ProxyOut)
+	if err != nil {
+		return apiStatus{}, err
+	}
+	status := apiStatus{
+		Capture:  mustReadSmallFile(cfg.CaptureStatus),
+		Scan:     mustReadSmallFile(cfg.ScanStatus),
+		Detector: mustReadSmallFile(cfg.DetectorStatus),
+		Proxy:    len(proxy),
+	}
+	resultByDomain := map[string]bool{}
+	for _, item := range results {
+		if source == "" || item.Source == source {
+			status.Results++
+			resultByDomain[item.Domain] = true
+		}
+	}
+	pendingSeen := map[string]bool{}
+	for _, item := range seen {
+		if source != "" && item.Source != source {
+			continue
+		}
+		status.Seen++
+		if !resultByDomain[item.Domain] && !pendingSeen[item.Domain] {
+			pendingSeen[item.Domain] = true
+			status.Pending++
+		}
+	}
+	return status, nil
+}
+
+func buildDomainRows(cfg config, source string, limit int) ([]apiDomainRow, error) {
+	seen, err := readSeen(cfg.Queue)
+	if err != nil {
+		return nil, err
+	}
+	results, err := readResults(cfg.Results)
+	if err != nil {
+		return nil, err
+	}
+	queries := map[string]int{}
+	sourceByDomain := map[string]string{}
+	bestCountByDomain := map[string]int{}
+	for _, item := range seen {
+		if source != "" && item.Source != source {
+			continue
+		}
+		queries[item.Domain] += item.Count
+		if item.Count > bestCountByDomain[item.Domain] {
+			sourceByDomain[item.Domain] = item.Source
+			bestCountByDomain[item.Domain] = item.Count
+		}
+	}
+	rows := make([]apiDomainRow, 0, len(queries)+len(results))
+	done := map[string]bool{}
+	for _, result := range results {
+		if source != "" && result.Source != source {
+			continue
+		}
+		rows = append(rows, apiDomainRow{
+			Status:     result.Status,
+			Domain:     result.Domain,
+			Source:     result.Source,
+			Queries:    result.Count,
+			DirectCode: result.DirectCode,
+			DirectTime: result.DirectTime,
+			ProxyCode:  result.ProxyCode,
+			ProxyTime:  result.ProxyTime,
+			DPI:        result.DPIStatus,
+			Scanned:    result.Scanned,
+		})
+		done[result.Domain] = true
+	}
+	for domain, count := range queries {
+		if done[domain] {
+			continue
+		}
+		rows = append(rows, apiDomainRow{
+			Status:  "unchecked",
+			Domain:  domain,
+			Source:  sourceByDomain[domain],
+			Queries: count,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Status == rows[j].Status {
+			if rows[i].Queries == rows[j].Queries {
+				return rows[i].Domain < rows[j].Domain
+			}
+			return rows[i].Queries > rows[j].Queries
+		}
+		return rows[i].Status < rows[j].Status
+	})
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
+func readFlowEntries(path string, source string, limit int) ([]flowEntry, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+	var rows []flowEntry
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		parts := strings.Split(scanner.Text(), "\t")
+		if len(parts) < 9 || (source != "" && parts[2] != source) {
+			continue
+		}
+		rows = append(rows, flowEntry{
+			Time:    parseInt64(parts[0]),
+			Mode:    parts[1],
+			Source:  parts[2],
+			Target:  parts[3],
+			Port:    parts[4],
+			Status:  parts[5],
+			Packets: parseInt(parts[6]),
+			Bytes:   parseInt(parts[7]),
+			Detail:  parts[8],
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Time > rows[j].Time })
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
+func readDetectorHistory(path string, limit int) ([]detectorHistoryEntry, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+	var rows []detectorHistoryEntry
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		parts := strings.Split(scanner.Text(), "\t")
+		if len(parts) < 8 {
+			continue
+		}
+		rows = append(rows, detectorHistoryEntry{
+			RunID:   parts[0],
+			Time:    parseInt64(parts[1]),
+			Profile: parts[2],
+			Target:  parts[3],
+			Kind:    parts[4],
+			Status:  parts[5],
+			Detail:  parts[6],
+			Source:  parts[7],
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Time > rows[j].Time })
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
 func writeResults(path string, results map[string]resultEntry) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -1333,6 +1646,82 @@ func parseInt(raw string) int {
 func parseInt64(raw string) int64 {
 	val, _ := strconv.ParseInt(raw, 10, 64)
 	return val
+}
+
+func readSmallFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func mustReadSmallFile(path string) string {
+	out, _ := readSmallFile(path)
+	return out
+}
+
+func writeJSON(w http.ResponseWriter, value any, err error) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(value)
+}
+
+func cleanAPIArg(raw string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\t', '\r', '\n':
+			return -1
+		default:
+			return r
+		}
+	}, strings.TrimSpace(raw))
+}
+
+func writeMetrics(w http.ResponseWriter, cfg config) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	status, err := buildAPIStatus(cfg, "")
+	if err != nil {
+		fmt.Fprintf(w, "# sitewatch metrics error: %s\n", promEscape(err.Error()))
+		return
+	}
+	fmt.Fprintln(w, "# HELP sitewatch_seen_pairs_total Observed source/domain pairs.")
+	fmt.Fprintln(w, "# TYPE sitewatch_seen_pairs_total gauge")
+	fmt.Fprintf(w, "sitewatch_seen_pairs_total %d\n", status.Seen)
+	fmt.Fprintln(w, "# HELP sitewatch_results_count Scan result rows.")
+	fmt.Fprintln(w, "# TYPE sitewatch_results_count gauge")
+	fmt.Fprintf(w, "sitewatch_results_count %d\n", status.Results)
+	fmt.Fprintln(w, "# HELP sitewatch_pending_domains Domains waiting for scan.")
+	fmt.Fprintln(w, "# TYPE sitewatch_pending_domains gauge")
+	fmt.Fprintf(w, "sitewatch_pending_domains %d\n", status.Pending)
+	fmt.Fprintln(w, "# HELP sitewatch_proxy_domains Domains in VPN export list.")
+	fmt.Fprintln(w, "# TYPE sitewatch_proxy_domains gauge")
+	fmt.Fprintf(w, "sitewatch_proxy_domains %d\n", status.Proxy)
+	fmt.Fprintln(w, "# HELP sitewatch_component_status Raw status line by component.")
+	fmt.Fprintln(w, "# TYPE sitewatch_component_status gauge")
+	fmt.Fprintf(w, "sitewatch_component_status{component=\"capture\",raw=\"%s\"} 1\n", promEscape(status.Capture))
+	fmt.Fprintf(w, "sitewatch_component_status{component=\"scan\",raw=\"%s\"} 1\n", promEscape(status.Scan))
+	fmt.Fprintf(w, "sitewatch_component_status{component=\"detector\",raw=\"%s\"} 1\n", promEscape(status.Detector))
+	fmt.Fprintln(w, "# HELP sitewatch_last_scrape_timestamp_seconds SiteWatch metrics render time.")
+	fmt.Fprintln(w, "# TYPE sitewatch_last_scrape_timestamp_seconds gauge")
+	fmt.Fprintf(w, "sitewatch_last_scrape_timestamp_seconds %d\n", time.Now().Unix())
+}
+
+func promEscape(raw string) string {
+	raw = strings.ReplaceAll(raw, `\`, `\\`)
+	raw = strings.ReplaceAll(raw, `"`, `\"`)
+	raw = strings.ReplaceAll(raw, "\n", " ")
+	raw = strings.ReplaceAll(raw, "\t", " ")
+	return raw
 }
 
 func baseDomain(domain string) string {
