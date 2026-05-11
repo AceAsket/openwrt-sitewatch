@@ -15,6 +15,7 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates curl busybox-extras tcpdump
 
 COPY --from=build /out/sitewatch /usr/bin/sitewatch
+COPY files/usr/bin/sitewatch-agent /usr/bin/sitewatch-agent
 COPY files/usr/bin/sitewatch-collect /usr/bin/sitewatch-collect
 COPY files/usr/bin/sitewatch-capture /usr/bin/sitewatch-capture
 COPY files/usr/bin/sitewatch-scan /usr/bin/sitewatch-scan
@@ -32,6 +33,7 @@ COPY scripts/docker-entrypoint.sh /usr/local/bin/sitewatch-docker-entrypoint
 
 RUN chmod +x \
 	/usr/bin/sitewatch \
+	/usr/bin/sitewatch-agent \
 	/usr/bin/sitewatch-collect \
 	/usr/bin/sitewatch-capture \
 	/usr/bin/sitewatch-scan \

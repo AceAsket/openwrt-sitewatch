@@ -182,6 +182,7 @@ sitewatch-agent stop
 ```
 
 Агент не пишет растущий DNS-лог на роутере: он держит только маленький статус в `/tmp/sitewatch-agent.status` и отправляет события в ingest endpoint контейнера. Если `SITEWATCH_DNS_SOURCE=packet` или `auto` при установленном `tcpdump`, агент видит также DNS-запросы LAN-устройств к внешним DNS-серверам, не только запросы к локальному `dnsmasq`.
+`sitewatch-agent` оставлен как совместимая обертка; запуск/остановка агента, pid/status-файлы, временное управление dnsmasq logging и отправка ingest-событий теперь выполняются Go-командой `sitewatch agent`.
 
 Для Prometheus в контейнере и на OpenWrt доступен scrape endpoint:
 

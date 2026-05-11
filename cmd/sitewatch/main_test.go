@@ -125,6 +125,27 @@ func TestParseCaptureDuration(t *testing.T) {
 	}
 }
 
+func TestParseAgentDuration(t *testing.T) {
+	tests := []struct {
+		args     []string
+		duration int
+		stop     bool
+	}{
+		{nil, 45, false},
+		{[]string{"stop"}, 0, true},
+		{[]string{"0"}, 0, false},
+		{[]string{"2"}, 5, false},
+		{[]string{"4000"}, 3600, false},
+		{[]string{"bad"}, 45, false},
+	}
+	for _, tt := range tests {
+		duration, stop := parseAgentDuration(tt.args)
+		if duration != tt.duration || stop != tt.stop {
+			t.Fatalf("parseAgentDuration(%v) = (%d, %v), want (%d, %v)", tt.args, duration, stop, tt.duration, tt.stop)
+		}
+	}
+}
+
 func TestNormalizeDNSSource(t *testing.T) {
 	if got := normalizeDNSSource("packet"); got != "packet" {
 		t.Fatalf("normalizeDNSSource(packet) = %q", got)
@@ -199,6 +220,27 @@ func TestParseTCPDumpDNSLine(t *testing.T) {
 	event, ok := parseTCPDumpDNSLine(line)
 	if !ok {
 		t.Fatalf("parseTCPDumpDNSLine() rejected sample")
+	}
+	if event.Source != "192.168.50.80" || event.Domain != "youmagine.com" {
+		t.Fatalf("event = %+v", event)
+	}
+}
+
+func TestParseDNSmasqLogLine(t *testing.T) {
+	line := "Mon May 11 17:35:20 2026 daemon.info dnsmasq[1]: query[A] YouMagine.COM from 192.168.50.80"
+	event, ok := parseDNSmasqLogLine(line)
+	if !ok {
+		t.Fatalf("parseDNSmasqLogLine() rejected sample")
+	}
+	if event.Source != "192.168.50.80" || event.Domain != "youmagine.com" {
+		t.Fatalf("event = %+v", event)
+	}
+}
+
+func TestParseTSVDNSEventLine(t *testing.T) {
+	event, ok := parseTSVDNSEventLine("192.168.50.80\tyoumagine.com")
+	if !ok {
+		t.Fatalf("parseTSVDNSEventLine() rejected sample")
 	}
 	if event.Source != "192.168.50.80" || event.Domain != "youmagine.com" {
 		t.Fatalf("event = %+v", event)

@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 )
@@ -39,6 +40,9 @@ type config struct {
 	CollectInterval time.Duration
 	DNSmasqControl  bool
 	DNSSource       string
+	AgentStatus     string
+	AgentStop       string
+	AgentPID        string
 	DetectorStatus  string
 	DetectorHistory string
 	DetectorBin     string
@@ -222,6 +226,8 @@ func main() {
 		err = cmdScan(cfg)
 	case "capture":
 		err = cmdCapture(cfg, os.Args[2:])
+	case "agent":
+		err = cmdAgent(cfg, os.Args[2:])
 	case "probe":
 		err = cmdProbe(cfg, os.Args[2:])
 	case "reflector":
@@ -248,6 +254,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: sitewatch check-url [--add] <url>")
 	fmt.Fprintln(os.Stderr, "       sitewatch scan")
 	fmt.Fprintln(os.Stderr, "       sitewatch capture [duration|stop]")
+	fmt.Fprintln(os.Stderr, "       sitewatch agent [duration|stop]")
 	fmt.Fprintln(os.Stderr, "       sitewatch probe [udp|tcp|both] host:port[,port...]")
 	fmt.Fprintln(os.Stderr, "       sitewatch reflector [listen]")
 	fmt.Fprintln(os.Stderr, "       sitewatch serve [listen]")
@@ -282,6 +289,9 @@ func loadConfig() config {
 		CollectInterval: time.Duration(getInt(values, "SITEWATCH_CAPTURE_COLLECT_INTERVAL", 5)) * time.Second,
 		DNSmasqControl:  getStr(values, "SITEWATCH_DNSMASQ_CONTROL", "1") == "1",
 		DNSSource:       getStr(values, "SITEWATCH_DNS_SOURCE", "auto"),
+		AgentStatus:     getStr(values, "SITEWATCH_AGENT_STATUS", "/tmp/sitewatch-agent.status"),
+		AgentStop:       getStr(values, "SITEWATCH_AGENT_STOP", "/tmp/sitewatch-agent.stop"),
+		AgentPID:        getStr(values, "SITEWATCH_AGENT_PID", "/tmp/sitewatch-agent.pid"),
 		DetectorStatus:  getStr(values, "SITEWATCH_DETECTOR_STATUS", "/tmp/sitewatch-detector.status"),
 		DetectorHistory: getStr(values, "SITEWATCH_DETECTOR_HISTORY", "/etc/sitewatch/detector-history.tsv"),
 		DetectorBin:     getStr(values, "SITEWATCH_DETECTOR_BIN", "/usr/bin/sitewatch"),
@@ -687,6 +697,120 @@ func cmdCapture(cfg config, args []string) error {
 	}
 }
 
+func cmdAgent(cfg config, args []string) error {
+	duration, stop := parseAgentDuration(args)
+	now := time.Now().Unix()
+	if stop {
+		_ = touchFile(cfg.AgentStop)
+		if pid := readPIDFile(cfg.AgentPID); pid > 0 {
+			killProcess(pid)
+		}
+		writeAgentStatus(cfg, "stopped", now, 0, now, 0)
+		return nil
+	}
+	target := normalizeContainerAddr(cfg.AgentIngestURL)
+	if target == "" {
+		return errors.New("SITEWATCH_AGENT_INGEST_URL is not configured")
+	}
+	if pid := readPIDFile(cfg.AgentPID); pid > 0 && processRunning(pid) {
+		fmt.Println("sitewatch-agent already running")
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(cfg.AgentStatus), 0o755); err != nil {
+		return err
+	}
+	_ = os.Remove(cfg.AgentStop)
+	if err := os.WriteFile(cfg.AgentPID, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		return err
+	}
+
+	source := normalizeDNSSource(cfg.DNSSource)
+	useDNSmasq, usePacket := captureSources(cfg, source)
+	if useDNSmasq && !commandExists("logread") {
+		useDNSmasq = false
+	}
+	if usePacket && (cfg.DNSDumpBin == "" || !commandExists("tcpdump")) {
+		usePacket = false
+	}
+	if !useDNSmasq && !usePacket {
+		_ = os.Remove(cfg.AgentPID)
+		return errors.New("no DNS source is available")
+	}
+
+	prev, controlEnabled := captureDNSmasqState(cfg, useDNSmasq)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var commands []*exec.Cmd
+	cleanup := func(state string, started int64, last int64, count int) {
+		cancel()
+		for _, cmd := range commands {
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+				_, _ = cmd.Process.Wait()
+			}
+		}
+		if controlEnabled {
+			restoreDNSmasqLogging(prev)
+		}
+		_ = os.Remove(cfg.AgentPID)
+		_ = os.Remove(cfg.AgentStop)
+		writeAgentStatus(cfg, state, started, duration, last, count)
+	}
+
+	started := time.Now().Unix()
+	last := started
+	sent := 0
+	writeAgentStatus(cfg, "running", started, duration, last, sent)
+	if controlEnabled {
+		enableDNSmasqLogging()
+	}
+
+	events := make(chan dnsDumpEvent, 64)
+	if useDNSmasq {
+		cmd, err := startEventCommand(ctx, events, "logread", []string{"-f"}, parseDNSmasqLogLine)
+		if err == nil {
+			commands = append(commands, cmd)
+		}
+	}
+	if usePacket {
+		cmd, err := startEventCommand(ctx, events, cfg.DNSDumpBin, []string{"stdout", "0"}, parseTSVDNSEventLine)
+		if err == nil {
+			commands = append(commands, cmd)
+		}
+	}
+	if len(commands) == 0 {
+		cleanup("done", started, last, sent)
+		return errors.New("no DNS source could be started")
+	}
+
+	timer := (*time.Timer)(nil)
+	if duration > 0 {
+		timer = time.NewTimer(time.Duration(duration) * time.Second)
+		defer timer.Stop()
+	}
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case event := <-events:
+			event.TS = time.Now().Unix()
+			if postAgentEvent(cfg, target, event) {
+				sent++
+				last = event.TS
+				writeAgentStatus(cfg, "running", started, duration, last, sent)
+			}
+		case <-tick.C:
+			if fileExists(cfg.AgentStop) {
+				cleanup("stopped", started, time.Now().Unix(), sent)
+				return nil
+			}
+		case <-timerC(timer):
+			cleanup("done", started, time.Now().Unix(), sent)
+			return nil
+		}
+	}
+}
+
 func parseCaptureDuration(args []string) (int, bool) {
 	raw := "45"
 	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
@@ -708,6 +832,131 @@ func parseCaptureDuration(args []string) (int, bool) {
 		}
 	}
 	return duration, false
+}
+
+func parseAgentDuration(args []string) (int, bool) {
+	duration, stop := parseCaptureDuration(args)
+	if duration > 600 {
+		duration = 600
+	}
+	raw := ""
+	if len(args) > 0 {
+		raw = strings.TrimSpace(args[0])
+	}
+	if raw != "" && raw != "stop" {
+		duration = parseInt(raw)
+		if duration <= 0 && raw != "0" {
+			duration = 45
+		}
+	}
+	if duration != 0 {
+		if duration < 5 {
+			duration = 5
+		}
+		if duration > 3600 {
+			duration = 3600
+		}
+	}
+	return duration, stop
+}
+
+type dnsLineParser func(string) (dnsDumpEvent, bool)
+
+func startEventCommand(ctx context.Context, events chan<- dnsDumpEvent, name string, args []string, parser dnsLineParser) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			if event, ok := parser(scanner.Text()); ok {
+				select {
+				case events <- event:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return cmd, nil
+}
+
+func parseDNSmasqLogLine(line string) (dnsDumpEvent, bool) {
+	fields := strings.Fields(line)
+	source := ""
+	domain := ""
+	for i, field := range fields {
+		if strings.HasPrefix(field, "query[") && i+1 < len(fields) {
+			domain = cleanDNSDomain(fields[i+1])
+		}
+		if field == "from" && i+1 < len(fields) {
+			source = fields[i+1]
+		}
+	}
+	if source == "" || domain == "" || strings.HasPrefix(source, "127.") || source == "::1" {
+		return dnsDumpEvent{}, false
+	}
+	return dnsDumpEvent{Source: source, Domain: domain}, true
+}
+
+func parseTSVDNSEventLine(line string) (dnsDumpEvent, bool) {
+	source, domain, ok := strings.Cut(line, "\t")
+	if !ok {
+		return dnsDumpEvent{}, false
+	}
+	domain = cleanDNSDomain(domain)
+	if source == "" || domain == "" || strings.HasPrefix(source, "127.") || source == "::1" {
+		return dnsDumpEvent{}, false
+	}
+	return dnsDumpEvent{Source: source, Domain: domain}, true
+}
+
+func postAgentEvent(cfg config, target string, event dnsDumpEvent) bool {
+	if event.Source == "" || event.Domain == "" {
+		return false
+	}
+	values := url.Values{}
+	values.Set("action", "ingest")
+	values.Set("source", event.Source)
+	values.Set("domain", event.Domain)
+	values.Set("ts", strconv.FormatInt(event.TS, 10))
+	if cfg.IngestToken != "" {
+		values.Set("token", cfg.IngestToken)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+target+"/cgi-bin/sitewatch?"+values.Encode(), nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 400
+}
+
+func writeAgentStatus(cfg config, state string, started int64, duration int, last int64, count int) {
+	if cfg.AgentStatus == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(cfg.AgentStatus), 0o755)
+	line := fmt.Sprintf("%s\t%d\t%d\t%d\t%d\n", state, started, duration, last, count)
+	_ = os.WriteFile(cfg.AgentStatus, []byte(line), 0o644)
+}
+
+func timerC(timer *time.Timer) <-chan time.Time {
+	if timer == nil {
+		return nil
+	}
+	return timer.C
 }
 
 func normalizeDNSSource(source string) string {
@@ -804,6 +1053,35 @@ func commandExists(name string) bool {
 func fileExecutable(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
+}
+
+func readPIDFile(path string) int {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return parseInt(strings.TrimSpace(string(raw)))
+}
+
+func processRunning(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
+}
+
+func killProcess(pid int) {
+	if pid <= 0 {
+		return
+	}
+	process, err := os.FindProcess(pid)
+	if err == nil {
+		_ = process.Kill()
+	}
 }
 
 func cmdProbe(cfg config, args []string) error {
