@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -128,5 +129,50 @@ func TestReadFlowEntriesAndDetectorHistory(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Profile != "site" || entries[0].Status != "slow" {
 		t.Fatalf("entries = %+v", entries)
+	}
+}
+
+func TestDetectorMissingURLWritesHistory(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config{
+		DetectorStatus:  filepath.Join(dir, "status.tsv"),
+		DetectorHistory: filepath.Join(dir, "history.tsv"),
+		ProxyOut:        filepath.Join(dir, "proxy.txt"),
+		NetResults:      filepath.Join(dir, "net.tsv"),
+		FlowResults:     filepath.Join(dir, "flow.tsv"),
+	}
+	run := newDetectorRun(cfg, []string{"site"})
+	if err := run.run(); err != nil {
+		t.Fatalf("run detector: %v", err)
+	}
+	status, err := readSmallFile(cfg.DetectorStatus)
+	if err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if !strings.Contains(status, "done") {
+		t.Fatalf("status = %q, want done", status)
+	}
+	entries, err := readDetectorHistory(cfg.DetectorHistory, 10)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2: %+v", len(entries), entries)
+	}
+	foundError := false
+	for _, entry := range entries {
+		if entry.Kind == "error" && entry.Status == "error" {
+			foundError = true
+		}
+	}
+	if !foundError {
+		t.Fatalf("error history entry not found: %+v", entries)
+	}
+}
+
+func TestCleanTSVField(t *testing.T) {
+	got := cleanTSVField(" a\tb\n c  ")
+	if got != "a b c" {
+		t.Fatalf("cleanTSVField() = %q", got)
 	}
 }

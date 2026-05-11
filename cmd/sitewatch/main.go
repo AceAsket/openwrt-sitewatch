@@ -36,6 +36,7 @@ type config struct {
 	DetectorStatus  string
 	DetectorHistory string
 	DetectorBin     string
+	FlowProbeBin    string
 	Proxy           string
 	Batch           int
 	Workers         int
@@ -164,6 +165,20 @@ type detectorHistoryEntry struct {
 	Source  string `json:"source"`
 }
 
+type detectorRun struct {
+	cfg      config
+	runID    string
+	profile  string
+	url      string
+	target   string
+	ports    []int
+	duration int
+	source   string
+	started  int64
+	total    int
+	done     int
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -183,6 +198,8 @@ func main() {
 		err = cmdReflector(cfg, os.Args[2:])
 	case "serve":
 		err = cmdServe(cfg, os.Args[2:])
+	case "detector":
+		err = cmdDetector(cfg, os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -199,6 +216,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       sitewatch probe [udp|tcp|both] host:port[,port...]")
 	fmt.Fprintln(os.Stderr, "       sitewatch reflector [listen]")
 	fmt.Fprintln(os.Stderr, "       sitewatch serve [listen]")
+	fmt.Fprintln(os.Stderr, "       sitewatch detector [quick|site|discord|full] [url] [target] [ports] [duration] [source]")
 }
 
 func loadConfig() config {
@@ -223,7 +241,8 @@ func loadConfig() config {
 		CaptureStatus:   getStr(values, "SITEWATCH_CAPTURE_STATUS", "/tmp/sitewatch-capture.status"),
 		DetectorStatus:  getStr(values, "SITEWATCH_DETECTOR_STATUS", "/tmp/sitewatch-detector.status"),
 		DetectorHistory: getStr(values, "SITEWATCH_DETECTOR_HISTORY", "/etc/sitewatch/detector-history.tsv"),
-		DetectorBin:     getStr(values, "SITEWATCH_DETECTOR_BIN", "/usr/bin/sitewatch-detector"),
+		DetectorBin:     getStr(values, "SITEWATCH_DETECTOR_BIN", "/usr/bin/sitewatch"),
+		FlowProbeBin:    getStr(values, "SITEWATCH_FLOW_PROBE_BIN", "/usr/bin/sitewatch-flow-probe"),
 		Proxy:           getStr(values, "SITEWATCH_PROXY", "socks5h://127.0.0.1:20170"),
 		Batch:           getInt(values, "SITEWATCH_BATCH", 12),
 		Workers:         getInt(values, "SITEWATCH_SCAN_WORKERS", 4),
@@ -658,6 +677,224 @@ func appendNetResults(path string, results []netProbeResult) error {
 	return nil
 }
 
+func cmdDetector(cfg config, args []string) error {
+	run := newDetectorRun(cfg, args)
+	return run.run()
+}
+
+func newDetectorRun(cfg config, args []string) *detectorRun {
+	profile := "quick"
+	if len(args) > 0 && args[0] != "" {
+		profile = cleanAPIArg(args[0])
+	}
+	switch profile {
+	case "quick", "site", "discord", "full":
+	default:
+		profile = "quick"
+	}
+	value := func(index int) string {
+		if len(args) > index {
+			return cleanAPIArg(args[index])
+		}
+		return ""
+	}
+	durationRaw := value(4)
+	duration := 45
+	if durationRaw != "" {
+		duration = parseInt(durationRaw)
+	}
+	if duration < 0 {
+		duration = 45
+	}
+	if duration > 300 {
+		duration = 300
+	}
+	target := value(2)
+	if target == "" {
+		target = cfg.ProbeTarget
+	}
+	ports := parsePorts(value(3))
+	if len(ports) == 0 {
+		ports = append([]int(nil), cfg.ProbePorts...)
+	}
+	run := &detectorRun{
+		cfg:      cfg,
+		runID:    fmt.Sprintf("%d-%d", time.Now().Unix(), os.Getpid()),
+		profile:  profile,
+		url:      value(1),
+		target:   target,
+		ports:    ports,
+		duration: duration,
+		source:   value(5),
+		started:  time.Now().Unix(),
+	}
+	run.total = run.estimateTotal()
+	if run.total < 1 {
+		run.total = 1
+	}
+	return run
+}
+
+func (d *detectorRun) estimateTotal() int {
+	total := 0
+	switch d.profile {
+	case "quick", "site":
+		if d.url != "" {
+			total++
+		}
+	case "discord":
+		if d.target != "" {
+			total++
+		}
+		total++
+	case "full":
+		if d.url != "" {
+			total++
+		}
+		if d.target != "" {
+			total++
+		}
+		total++
+	}
+	return total
+}
+
+func (d *detectorRun) run() error {
+	if err := os.MkdirAll(filepath.Dir(d.cfg.DetectorHistory), 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(d.cfg.DetectorStatus), 0o755); err != nil {
+		return err
+	}
+	d.writeStatus("running", "Старт", "")
+
+	switch d.profile {
+	case "quick", "site":
+		d.runSiteCheck()
+		d.done++
+	case "discord":
+		d.runNetCheck()
+		d.done++
+		d.runFlowCheck()
+		d.done++
+	case "full":
+		if d.url != "" {
+			d.runSiteCheck()
+			d.done++
+		}
+		if d.target != "" {
+			d.runNetCheck()
+			d.done++
+		}
+		d.runFlowCheck()
+		d.done++
+	}
+
+	target := d.url
+	if target == "" {
+		target = d.target
+	}
+	if target == "" {
+		target = "проверка"
+	}
+	d.appendHistory("summary", "done", target, "Профиль завершен")
+	d.done = d.total
+	d.writeStatus("done", "Готово", "Профиль завершен, результаты сохранены в истории")
+	return nil
+}
+
+func (d *detectorRun) writeStatus(state string, current string, summary string) {
+	line := fmt.Sprintf("%s\t%d\t%d\t%d\t%s\t%d\t%s\t%s\n",
+		cleanTSVField(state), d.started, d.total, d.done, cleanTSVField(current), time.Now().Unix(), cleanTSVField(d.profile), cleanTSVField(summary))
+	_ = os.WriteFile(d.cfg.DetectorStatus, []byte(line), 0o644)
+}
+
+func (d *detectorRun) appendHistory(kind string, status string, item string, detail string) {
+	_ = os.MkdirAll(filepath.Dir(d.cfg.DetectorHistory), 0o755)
+	file, err := os.OpenFile(d.cfg.DetectorHistory, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	fmt.Fprintf(file, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		cleanTSVField(d.runID), time.Now().Unix(), cleanTSVField(d.profile), cleanTSVField(item), cleanTSVField(kind), cleanTSVField(status), cleanTSVField(detail), cleanTSVField(d.source))
+}
+
+func (d *detectorRun) runSiteCheck() {
+	if d.url == "" {
+		d.appendHistory("error", "error", "-", "URL не задан")
+		return
+	}
+	d.writeStatus("running", "Проверка сайта "+d.url, "")
+	result, err := checkURL(d.cfg, d.url, false)
+	if err != nil {
+		d.appendHistory("site", "error", d.url, err.Error())
+		return
+	}
+	detail := fmt.Sprintf("direct %s/%.6fs; proxy %s/%.6fs; DNS %s; TLS1.3 %s; TLS1.2 %s; HTTP %s",
+		result.Direct.Code, result.Direct.Time, result.Proxy.Code, result.Proxy.Time, result.DPI.DNS.Status, result.DPI.TLS13.Status, result.DPI.TLS12.Status, result.DPI.HTTP.Status)
+	d.appendHistory("site", result.Status, result.Domain, detail)
+}
+
+func (d *detectorRun) runNetCheck() {
+	if d.target == "" {
+		d.appendHistory("error", "error", "-", "Цель UDP/TCP не задана")
+		return
+	}
+	host, portFromTarget, err := splitProbeTarget(d.target)
+	if err != nil {
+		d.appendHistory("net", "error", d.target, err.Error())
+		return
+	}
+	ports := append([]int(nil), d.ports...)
+	if portFromTarget > 0 {
+		ports = []int{portFromTarget}
+	}
+	if len(ports) == 0 {
+		d.appendHistory("net", "error", d.target, "Порты не заданы")
+		return
+	}
+	d.writeStatus("running", "Активная UDP/TCP проверка "+host, "")
+	var results []netProbeResult
+	for _, port := range ports {
+		results = append(results, probeUDP(d.cfg, host, port))
+		results = append(results, probeTCP(d.cfg, host, port))
+	}
+	_ = appendNetResults(d.cfg.NetResults, results)
+	for _, result := range results {
+		detail := fmt.Sprintf("%s; rtt %.6fs; %s", result.Mode, result.RTT, result.Detail)
+		d.appendHistory("net", result.Status, fmt.Sprintf("%s:%d", result.Target, result.Port), detail)
+	}
+}
+
+func (d *detectorRun) runFlowCheck() {
+	d.writeStatus("running", fmt.Sprintf("Пассивное наблюдение conntrack %d с", d.duration), "")
+	mark := time.Now().Unix()
+	if d.cfg.FlowProbeBin != "" {
+		_ = exec.Command(d.cfg.FlowProbeBin, strconv.Itoa(d.duration)).Run()
+	}
+	rows, err := readFlowEntries(d.cfg.FlowResults, d.source, 0)
+	if err != nil {
+		d.appendHistory("flow", "error", "-", err.Error())
+		return
+	}
+	count := 0
+	for _, row := range rows {
+		if row.Time < mark {
+			continue
+		}
+		detail := fmt.Sprintf("%s; %s; packets %d; bytes %d; %s", row.Mode, row.Source, row.Packets, row.Bytes, row.Detail)
+		d.appendHistory("flow", row.Status, row.Target+":"+row.Port, detail)
+		count++
+		if count >= 18 {
+			break
+		}
+	}
+	if count == 0 {
+		d.appendHistory("flow", "observed", "-", "Новых flow за окно не найдено")
+	}
+}
+
 func cmdReflector(cfg config, args []string) error {
 	listen := cfg.ReflectorListen
 	if len(args) > 0 && args[0] != "" {
@@ -719,7 +956,8 @@ func cmdServe(cfg config, args []string) error {
 		if args[0] == "" {
 			args[0] = "quick"
 		}
-		cmd := exec.Command(cfg.DetectorBin, args...)
+		cmdArgs := append([]string{"detector"}, args...)
+		cmd := exec.Command(cfg.DetectorBin, cmdArgs...)
 		if err := cmd.Start(); err != nil {
 			writeJSON(w, nil, err)
 			return
@@ -1685,6 +1923,18 @@ func cleanAPIArg(raw string) string {
 			return r
 		}
 	}, strings.TrimSpace(raw))
+}
+
+func cleanTSVField(raw string) string {
+	raw = strings.Map(func(r rune) rune {
+		switch r {
+		case '\t', '\r', '\n':
+			return ' '
+		default:
+			return r
+		}
+	}, strings.TrimSpace(raw))
+	return strings.Join(strings.Fields(raw), " ")
 }
 
 func writeMetrics(w http.ResponseWriter, cfg config) {
