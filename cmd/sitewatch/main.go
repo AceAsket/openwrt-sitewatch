@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/exec"
@@ -27,6 +28,7 @@ import (
 
 type config struct {
 	Queue           string
+	Seen            string
 	Results         string
 	NetResults      string
 	FlowResults     string
@@ -38,6 +40,9 @@ type config struct {
 	CaptureStop     string
 	CollectBin      string
 	CollectInterval time.Duration
+	LogLines        int
+	LogFiles        []string
+	UseLogread      bool
 	DNSmasqControl  bool
 	DNSSource       string
 	AgentStatus     string
@@ -52,6 +57,13 @@ type config struct {
 	DNSDumpEvents   string
 	AgentIngestURL  string
 	IngestToken     string
+	PiHoleEnabled   bool
+	PiHoleURL       string
+	PiHolePassword  string
+	PiHoleLookback  int
+	PiHoleLimit     int
+	PiHoleDisk      bool
+	PiHoleStatus    string
 	FlowUDPPorts    []portRange
 	FlowTCPPorts    []portRange
 	Proxy           string
@@ -224,6 +236,8 @@ func main() {
 		err = cmdCheckURL(cfg, os.Args[2:])
 	case "scan":
 		err = cmdScan(cfg)
+	case "collect":
+		err = cmdCollect(cfg)
 	case "capture":
 		err = cmdCapture(cfg, os.Args[2:])
 	case "agent":
@@ -253,6 +267,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: sitewatch check-url [--add] <url>")
 	fmt.Fprintln(os.Stderr, "       sitewatch scan")
+	fmt.Fprintln(os.Stderr, "       sitewatch collect")
 	fmt.Fprintln(os.Stderr, "       sitewatch capture [duration|stop]")
 	fmt.Fprintln(os.Stderr, "       sitewatch agent [duration|stop]")
 	fmt.Fprintln(os.Stderr, "       sitewatch probe [udp|tcp|both] host:port[,port...]")
@@ -276,6 +291,7 @@ func loadConfig() config {
 
 	return config{
 		Queue:           getStr(values, "SITEWATCH_QUEUE", "/etc/sitewatch/queue.tsv"),
+		Seen:            getStr(values, "SITEWATCH_SEEN", "/etc/sitewatch/seen.tsv"),
 		Results:         getStr(values, "SITEWATCH_RESULTS", "/etc/sitewatch/results.tsv"),
 		NetResults:      getStr(values, "SITEWATCH_NET_RESULTS", "/etc/sitewatch/net-probes.tsv"),
 		FlowResults:     getStr(values, "SITEWATCH_FLOW_RESULTS", "/etc/sitewatch/flow-probes.tsv"),
@@ -287,6 +303,9 @@ func loadConfig() config {
 		CaptureStop:     getStr(values, "SITEWATCH_CAPTURE_STOP", "/tmp/sitewatch-capture.stop"),
 		CollectBin:      getStr(values, "SITEWATCH_COLLECT_BIN", "/usr/bin/sitewatch-collect"),
 		CollectInterval: time.Duration(getInt(values, "SITEWATCH_CAPTURE_COLLECT_INTERVAL", 5)) * time.Second,
+		LogLines:        getInt(values, "SITEWATCH_LOG_LINES", 300),
+		LogFiles:        strings.Fields(getStr(values, "SITEWATCH_LOG_FILES", "/var/log/pihole/pihole.log /tmp/log/dnsmasq.log /var/log/messages")),
+		UseLogread:      getStr(values, "SITEWATCH_USE_LOGREAD", "1") == "1",
 		DNSmasqControl:  getStr(values, "SITEWATCH_DNSMASQ_CONTROL", "1") == "1",
 		DNSSource:       getStr(values, "SITEWATCH_DNS_SOURCE", "auto"),
 		AgentStatus:     getStr(values, "SITEWATCH_AGENT_STATUS", "/tmp/sitewatch-agent.status"),
@@ -301,6 +320,13 @@ func loadConfig() config {
 		DNSDumpEvents:   getStr(values, "SITEWATCH_DNS_DUMP_EVENTS", "/tmp/sitewatch-dns-dump.tsv"),
 		AgentIngestURL:  getStr(values, "SITEWATCH_AGENT_INGEST_URL", ""),
 		IngestToken:     getStr(values, "SITEWATCH_INGEST_TOKEN", ""),
+		PiHoleEnabled:   getStr(values, "SITEWATCH_PIHOLE_API_ENABLED", "0") == "1",
+		PiHoleURL:       getStr(values, "SITEWATCH_PIHOLE_URL", ""),
+		PiHolePassword:  getStr(values, "SITEWATCH_PIHOLE_PASSWORD", ""),
+		PiHoleLookback:  getInt(values, "SITEWATCH_PIHOLE_LOOKBACK", 600),
+		PiHoleLimit:     getInt(values, "SITEWATCH_PIHOLE_LIMIT", 1000),
+		PiHoleDisk:      getStr(values, "SITEWATCH_PIHOLE_DISK", "0") == "1",
+		PiHoleStatus:    getStr(values, "SITEWATCH_PIHOLE_STATUS", "/tmp/sitewatch-pihole.status"),
 		FlowUDPPorts:    parsePortRanges(getStr(values, "SITEWATCH_FLOW_UDP_PORTS", "50000-65535 3478 443")),
 		FlowTCPPorts:    parsePortRanges(getStr(values, "SITEWATCH_FLOW_TCP_PORTS", "443 50000-65535")),
 		Proxy:           getStr(values, "SITEWATCH_PROXY", "socks5h://127.0.0.1:20170"),
@@ -629,6 +655,284 @@ func cmdScan(cfg config) error {
 	}
 	writeScanStatus(cfg, "done", now, len(domains), len(domains), "")
 	return nil
+}
+
+func cmdCollect(cfg config) error {
+	if cfg.LogLines < 1 {
+		cfg.LogLines = 300
+	}
+	var events []dnsDumpEvent
+	packetEvents, _ := readPacketDumpEvents(cfg.DNSDumpEvents, cfg.LogLines)
+	events = append(events, packetEvents...)
+	_ = os.WriteFile(cfg.DNSDumpEvents, nil, 0o644)
+
+	for _, path := range cfg.LogFiles {
+		rows, err := tailFileLines(path, cfg.LogLines)
+		if err != nil {
+			continue
+		}
+		for _, line := range rows {
+			if event, ok := parseDNSmasqLogLine(line); ok {
+				events = append(events, event)
+			}
+		}
+	}
+	if cfg.UseLogread && commandExists("logread") {
+		output, err := exec.Command("logread", "-e", "query[").Output()
+		if err == nil {
+			lines := tailStrings(strings.Split(strings.TrimRight(string(output), "\n"), "\n"), cfg.LogLines)
+			for _, line := range lines {
+				if event, ok := parseDNSmasqLogLine(line); ok {
+					events = append(events, event)
+				}
+			}
+		}
+	}
+	piholeEvents, piholeStatus := collectPiHoleEvents(cfg)
+	events = append(events, piholeEvents...)
+	writePiHoleStatus(cfg, piholeStatus)
+
+	now := time.Now().Unix()
+	seen, err := readSeen(cfg.Seen)
+	if err != nil {
+		return err
+	}
+	merged := mergeSeenEvents(seen, events, now)
+	if err := writeSeen(cfg.Seen, merged); err != nil {
+		return err
+	}
+	return writeSeen(cfg.Queue, merged)
+}
+
+func readPacketDumpEvents(path string, limit int) ([]dnsDumpEvent, error) {
+	lines, err := tailFileLines(path, limit)
+	if err != nil {
+		return nil, err
+	}
+	var events []dnsDumpEvent
+	for _, line := range lines {
+		if event, ok := parseTSVDNSEventLine(line); ok {
+			events = append(events, event)
+		}
+	}
+	return events, nil
+}
+
+func tailFileLines(path string, limit int) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+		if limit > 0 && len(lines) > limit {
+			copy(lines, lines[1:])
+			lines = lines[:limit]
+		}
+	}
+	return lines, scanner.Err()
+}
+
+func tailStrings(lines []string, limit int) []string {
+	if limit > 0 && len(lines) > limit {
+		return lines[len(lines)-limit:]
+	}
+	return lines
+}
+
+func mergeSeenEvents(seen []seenEntry, events []dnsDumpEvent, now int64) []seenEntry {
+	byKey := map[string]seenEntry{}
+	for _, item := range seen {
+		if item.Source == "" || item.Domain == "" {
+			continue
+		}
+		byKey[item.Source+"\t"+item.Domain] = item
+	}
+	for _, event := range events {
+		domain := cleanDNSDomain(event.Domain)
+		source := strings.TrimSpace(event.Source)
+		if source == "" || domain == "" || strings.HasPrefix(source, "127.") || source == "::1" {
+			continue
+		}
+		key := source + "\t" + domain
+		item := byKey[key]
+		if item.First == 0 {
+			item.First = now
+		}
+		item.Source = source
+		item.Domain = domain
+		item.Last = now
+		item.Count++
+		byKey[key] = item
+	}
+	items := make([]seenEntry, 0, len(byKey))
+	for _, item := range byKey {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Source == items[j].Source {
+			return items[i].Domain < items[j].Domain
+		}
+		return items[i].Source < items[j].Source
+	})
+	return items
+}
+
+type piHoleCollectStatus struct {
+	State string
+	URL   string
+	Count int
+	Time  int64
+}
+
+func collectPiHoleEvents(cfg config) ([]dnsDumpEvent, piHoleCollectStatus) {
+	status := piHoleCollectStatus{State: "disabled", URL: cfg.PiHoleURL, Time: time.Now().Unix()}
+	if !cfg.PiHoleEnabled {
+		return nil, status
+	}
+	baseURL := normalizePiHoleURL(cfg.PiHoleURL)
+	status.URL = baseURL
+	if baseURL == "" || cfg.PiHolePassword == "" {
+		status.State = "not_configured"
+		return nil, status
+	}
+	limit := cfg.PiHoleLimit
+	if limit < 100 {
+		limit = 100
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+	lookback := cfg.PiHoleLookback
+	if lookback <= 0 {
+		lookback = 600
+	}
+	events, err := fetchPiHoleEvents(baseURL, cfg.PiHolePassword, lookback, limit, cfg.PiHoleDisk)
+	if err != nil {
+		status.State = "auth_failed"
+		return nil, status
+	}
+	status.State = "ok"
+	status.Count = len(events)
+	return events, status
+}
+
+func normalizePiHoleURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimRight(raw, "/")
+	raw = strings.TrimSuffix(raw, "/admin")
+	return raw
+}
+
+func fetchPiHoleEvents(baseURL string, password string, lookback int, limit int, disk bool) ([]dnsDumpEvent, error) {
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar, Timeout: 15 * time.Second}
+	authBody, _ := json.Marshal(map[string]string{"password": password})
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/auth", strings.NewReader(string(authBody)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var auth struct {
+		Session struct {
+			Valid bool   `json:"valid"`
+			CSRF  string `json:"csrf"`
+		} `json:"session"`
+		Valid bool `json:"valid"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&auth); err != nil {
+		return nil, err
+	}
+	if !auth.Valid && !auth.Session.Valid {
+		return nil, errors.New("pihole_auth_failed")
+	}
+
+	queryURL, err := url.Parse(baseURL + "/api/queries")
+	if err != nil {
+		return nil, err
+	}
+	query := queryURL.Query()
+	query.Set("from", strconv.FormatInt(time.Now().Unix()-int64(lookback), 10))
+	query.Set("length", strconv.Itoa(limit))
+	if disk {
+		query.Set("disk", "true")
+	}
+	queryURL.RawQuery = query.Encode()
+	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if auth.Session.CSRF != "" {
+		req.Header.Set("X-CSRF-TOKEN", auth.Session.CSRF)
+	}
+	resp, err = client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload any
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4*1024*1024)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	var events []dnsDumpEvent
+	walkPiHolePayload(payload, &events)
+	return events, nil
+}
+
+func walkPiHolePayload(value any, events *[]dnsDumpEvent) {
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			walkPiHolePayload(item, events)
+		}
+	case map[string]any:
+		if domain, ok := stringFromAny(typed["domain"]); ok {
+			source := ""
+			if client, ok := typed["client"].(map[string]any); ok {
+				source, _ = stringFromAny(client["ip"])
+			} else {
+				source, _ = stringFromAny(typed["client"])
+			}
+			if domain = cleanDNSDomain(domain); source != "" && domain != "" && !strings.HasPrefix(source, "127.") && source != "::1" {
+				*events = append(*events, dnsDumpEvent{Source: source, Domain: domain})
+			}
+		}
+		for _, item := range typed {
+			walkPiHolePayload(item, events)
+		}
+	}
+}
+
+func stringFromAny(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return typed, typed != ""
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64), true
+	default:
+		return "", false
+	}
+}
+
+func writePiHoleStatus(cfg config, status piHoleCollectStatus) {
+	if cfg.PiHoleStatus == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(cfg.PiHoleStatus), 0o755)
+	line := fmt.Sprintf("%s\t%s\t%d\t%d\n", cleanTSVField(status.State), cleanTSVField(status.URL), status.Count, status.Time)
+	_ = os.WriteFile(cfg.PiHoleStatus, []byte(line), 0o644)
 }
 
 func cmdCapture(cfg config, args []string) error {
@@ -2584,6 +2888,35 @@ func readSeen(path string) ([]seenEntry, error) {
 		})
 	}
 	return out, scanner.Err()
+}
+
+func writeSeen(path string, items []seenEntry) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	writer := bufio.NewWriter(file)
+	for _, item := range items {
+		if item.Source == "" || item.Domain == "" {
+			continue
+		}
+		if _, err := fmt.Fprintf(writer, "%s\t%s\t%d\t%d\t%d\n", cleanTSVField(item.Source), cleanTSVField(item.Domain), item.First, item.Last, item.Count); err != nil {
+			file.Close()
+			return err
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func readResults(path string) (map[string]resultEntry, error) {

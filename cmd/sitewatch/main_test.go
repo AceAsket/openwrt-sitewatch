@@ -183,6 +183,51 @@ func TestReadFlowEntriesAndDetectorHistory(t *testing.T) {
 	}
 }
 
+func TestMergeSeenEvents(t *testing.T) {
+	got := mergeSeenEvents([]seenEntry{{
+		Source: "192.168.50.80",
+		Domain: "old.example",
+		First:  10,
+		Last:   20,
+		Count:  2,
+	}}, []dnsDumpEvent{
+		{Source: "192.168.50.80", Domain: "Old.Example."},
+		{Source: "192.168.50.81", Domain: "new.example"},
+		{Source: "127.0.0.1", Domain: "skip.example"},
+	}, 30)
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2: %+v", len(got), got)
+	}
+	seen := map[string]seenEntry{}
+	for _, item := range got {
+		seen[item.Source+"\t"+item.Domain] = item
+	}
+	if item := seen["192.168.50.80\told.example"]; item.Count != 3 || item.First != 10 || item.Last != 30 {
+		t.Fatalf("merged old = %+v", item)
+	}
+	if item := seen["192.168.50.81\tnew.example"]; item.Count != 1 || item.First != 30 || item.Last != 30 {
+		t.Fatalf("merged new = %+v", item)
+	}
+}
+
+func TestWalkPiHolePayload(t *testing.T) {
+	payload := map[string]any{
+		"queries": []any{
+			map[string]any{"domain": "YouMagine.COM.", "client": map[string]any{"ip": "192.168.50.80"}},
+			map[string]any{"domain": "bad.local", "client": "192.168.50.81"},
+			map[string]any{"domain": "shikimori.org", "client": "127.0.0.1"},
+		},
+	}
+	var events []dnsDumpEvent
+	walkPiHolePayload(payload, &events)
+	if len(events) != 1 {
+		t.Fatalf("len(events) = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].Source != "192.168.50.80" || events[0].Domain != "youmagine.com" {
+		t.Fatalf("event = %+v", events[0])
+	}
+}
+
 func TestParsePortRanges(t *testing.T) {
 	got := parsePortRanges("50000-65535 3478,443 443 bad 70000")
 	if len(got) != 3 {

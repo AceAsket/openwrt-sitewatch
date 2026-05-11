@@ -450,6 +450,8 @@ sitewatch-capture stop
 sitewatch-collect
 ```
 
+`sitewatch-collect` оставлен как совместимая обертка; сбор DNS-событий из packet dump, dnsmasq/logread и Pi-hole API теперь выполняет Go-команда `sitewatch collect`.
+
 Проверить пачку доменов:
 
 ```sh
