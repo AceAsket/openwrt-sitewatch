@@ -219,6 +219,7 @@ sitewatch serve :8095
 
 ```sh
 sitewatch-flow-probe
+sitewatch flow-probe
 ```
 
 Он не генерирует трафик, а смотрит активные UDP/TCP-сессии LAN-устройств и пишет подозрительные записи в `SITEWATCH_FLOW_RESULTS`. По умолчанию отслеживаются UDP `50000-65535`, `3478`, `443` и TCP `443`, `50000-65535`.
@@ -236,6 +237,7 @@ sitewatch-net-probe both <reflector-host> 3478,443,50000,55000,60000,65000
 sitewatch-net-probe udp <reflector-host> 50000,55000,60000,65000
 sitewatch-net-probe tcp <reflector-host> 443,50000
 sitewatch-flow-probe 45
+sitewatch flow-probe 45
 ```
 
 Результаты пишутся в `SITEWATCH_NET_RESULTS` и доступны во вкладке **Диагностика**. Если TCP до reflector работает, а UDP на высоких портах стабильно `timeout`, это хороший сигнал фильтрации UDP-диапазона. Если пассивный conntrack при реальном звонке показывает много исходящих UDP-пакетов без `ASSURED`, это подозрение на деградацию/блокировку уже по реальному трафику устройства.

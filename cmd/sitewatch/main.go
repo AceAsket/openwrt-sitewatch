@@ -37,6 +37,8 @@ type config struct {
 	DetectorHistory string
 	DetectorBin     string
 	FlowProbeBin    string
+	FlowUDPPorts    []portRange
+	FlowTCPPorts    []portRange
 	Proxy           string
 	Batch           int
 	Workers         int
@@ -154,6 +156,21 @@ type flowEntry struct {
 	Detail  string `json:"detail"`
 }
 
+type portRange struct {
+	Start int
+	End   int
+}
+
+type conntrackFlow struct {
+	Proto   string
+	Source  string
+	Target  string
+	Port    int
+	Assured bool
+	Packets int
+	Bytes   int
+}
+
 type detectorHistoryEntry struct {
 	RunID   string `json:"run_id"`
 	Time    int64  `json:"time"`
@@ -200,6 +217,8 @@ func main() {
 		err = cmdServe(cfg, os.Args[2:])
 	case "detector":
 		err = cmdDetector(cfg, os.Args[2:])
+	case "flow-probe":
+		err = cmdFlowProbe(cfg, os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -217,6 +236,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       sitewatch reflector [listen]")
 	fmt.Fprintln(os.Stderr, "       sitewatch serve [listen]")
 	fmt.Fprintln(os.Stderr, "       sitewatch detector [quick|site|discord|full] [url] [target] [ports] [duration] [source]")
+	fmt.Fprintln(os.Stderr, "       sitewatch flow-probe [duration]")
 }
 
 func loadConfig() config {
@@ -243,6 +263,8 @@ func loadConfig() config {
 		DetectorHistory: getStr(values, "SITEWATCH_DETECTOR_HISTORY", "/etc/sitewatch/detector-history.tsv"),
 		DetectorBin:     getStr(values, "SITEWATCH_DETECTOR_BIN", "/usr/bin/sitewatch"),
 		FlowProbeBin:    getStr(values, "SITEWATCH_FLOW_PROBE_BIN", "/usr/bin/sitewatch-flow-probe"),
+		FlowUDPPorts:    parsePortRanges(getStr(values, "SITEWATCH_FLOW_UDP_PORTS", "50000-65535 3478 443")),
+		FlowTCPPorts:    parsePortRanges(getStr(values, "SITEWATCH_FLOW_TCP_PORTS", "443 50000-65535")),
 		Proxy:           getStr(values, "SITEWATCH_PROXY", "socks5h://127.0.0.1:20170"),
 		Batch:           getInt(values, "SITEWATCH_BATCH", 12),
 		Workers:         getInt(values, "SITEWATCH_SCAN_WORKERS", 4),
@@ -322,6 +344,54 @@ func parsePorts(raw string) []int {
 	}
 	sort.Ints(ports)
 	return ports
+}
+
+func parsePortRanges(raw string) []portRange {
+	seen := map[portRange]bool{}
+	var ranges []portRange
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		startRaw, endRaw, hasRange := strings.Cut(part, "-")
+		start, err := strconv.Atoi(strings.TrimSpace(startRaw))
+		if err != nil || start < 1 || start > 65535 {
+			continue
+		}
+		end := start
+		if hasRange {
+			end, err = strconv.Atoi(strings.TrimSpace(endRaw))
+			if err != nil || end < 1 || end > 65535 {
+				continue
+			}
+		}
+		if end < start {
+			start, end = end, start
+		}
+		item := portRange{Start: start, End: end}
+		if seen[item] {
+			continue
+		}
+		seen[item] = true
+		ranges = append(ranges, item)
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		if ranges[i].Start == ranges[j].Start {
+			return ranges[i].End < ranges[j].End
+		}
+		return ranges[i].Start < ranges[j].Start
+	})
+	return ranges
+}
+
+func portInRanges(port int, ranges []portRange) bool {
+	for _, item := range ranges {
+		if port >= item.Start && port <= item.End {
+			return true
+		}
+	}
+	return false
 }
 
 type netProbeResult struct {
@@ -677,6 +747,227 @@ func appendNetResults(path string, results []netProbeResult) error {
 	return nil
 }
 
+func cmdFlowProbe(cfg config, args []string) error {
+	duration := 0
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		duration = parseInt(args[0])
+	}
+	if duration < 0 {
+		duration = 0
+	}
+	if duration > 300 {
+		duration = 300
+	}
+
+	start, err := readConntrackSnapshot(cfg)
+	if err != nil {
+		return appendFlowResults(cfg.FlowResults, []flowEntry{{
+			Time:   time.Now().Unix(),
+			Mode:   "passive",
+			Source: "-",
+			Target: "-",
+			Port:   "-",
+			Status: "not_available",
+			Detail: "conntrack is not available",
+		}})
+	}
+	if duration > 0 {
+		time.Sleep(time.Duration(duration) * time.Second)
+	}
+	end := start
+	if duration > 0 {
+		if snapshot, err := readConntrackSnapshot(cfg); err == nil {
+			end = snapshot
+		} else {
+			end = nil
+		}
+	}
+
+	rows := diffFlowSnapshots(start, end, duration, time.Now().Unix())
+	return appendFlowResults(cfg.FlowResults, rows)
+}
+
+func readConntrackSnapshot(cfg config) ([]conntrackFlow, error) {
+	if path, err := exec.LookPath("conntrack"); err == nil {
+		output, err := exec.Command(path, "-L").Output()
+		if err == nil {
+			return parseConntrackLines(cfg, string(output)), nil
+		}
+	}
+	for _, path := range []string{"/proc/net/nf_conntrack", "/proc/net/ip_conntrack"} {
+		output, err := os.ReadFile(path)
+		if err == nil {
+			return parseConntrackLines(cfg, string(output)), nil
+		}
+	}
+	return nil, errors.New("conntrack is not available")
+}
+
+func parseConntrackLines(cfg config, raw string) []conntrackFlow {
+	var flows []conntrackFlow
+	for _, line := range strings.Split(raw, "\n") {
+		if flow, ok := parseConntrackLine(cfg, line); ok {
+			flows = append(flows, flow)
+		}
+	}
+	return flows
+}
+
+func parseConntrackLine(cfg config, line string) (conntrackFlow, bool) {
+	fields := strings.Fields(line)
+	proto := ""
+	for _, field := range fields {
+		if field == "udp" || field == "tcp" {
+			proto = field
+			break
+		}
+	}
+	if proto == "" {
+		return conntrackFlow{}, false
+	}
+	value := func(name string) string {
+		prefix := name + "="
+		for _, field := range fields {
+			if strings.HasPrefix(field, prefix) {
+				return strings.TrimPrefix(field, prefix)
+			}
+		}
+		return ""
+	}
+	source := value("src")
+	target := value("dst")
+	port := parseInt(value("dport"))
+	packets := parseInt(value("packets"))
+	bytes := parseInt(value("bytes"))
+	if source == "" || target == "" || port < 1 || !isLANIP(source) || isNoiseTarget(target) {
+		return conntrackFlow{}, false
+	}
+	switch proto {
+	case "udp":
+		if !portInRanges(port, cfg.FlowUDPPorts) {
+			return conntrackFlow{}, false
+		}
+	case "tcp":
+		if !portInRanges(port, cfg.FlowTCPPorts) {
+			return conntrackFlow{}, false
+		}
+	}
+	return conntrackFlow{
+		Proto:   proto,
+		Source:  source,
+		Target:  target,
+		Port:    port,
+		Assured: strings.Contains(line, "ASSURED"),
+		Packets: packets,
+		Bytes:   bytes,
+	}, true
+}
+
+func isLANIP(ip string) bool {
+	if strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "192.168.") || strings.HasPrefix(ip, "fd") || strings.HasPrefix(ip, "fe80:") {
+		return true
+	}
+	if strings.HasPrefix(ip, "172.") {
+		parts := strings.Split(ip, ".")
+		if len(parts) > 1 {
+			second := parseInt(parts[1])
+			return second >= 16 && second <= 31
+		}
+	}
+	return false
+}
+
+func isNoiseTarget(ip string) bool {
+	return isLANIP(ip) ||
+		strings.HasPrefix(ip, "127.") ||
+		strings.HasPrefix(ip, "0.") ||
+		strings.HasPrefix(ip, "169.254.") ||
+		strings.HasPrefix(ip, "224.") ||
+		strings.HasPrefix(ip, "239.") ||
+		ip == "255.255.255.255" ||
+		strings.HasSuffix(ip, ".255") ||
+		strings.HasPrefix(ip, "ff")
+}
+
+func diffFlowSnapshots(start []conntrackFlow, end []conntrackFlow, duration int, now int64) []flowEntry {
+	startByKey := map[string]conntrackFlow{}
+	for _, flow := range start {
+		startByKey[flowKey(flow)] = flow
+	}
+	var rows []flowEntry
+	for _, flow := range end {
+		base := startByKey[flowKey(flow)]
+		deltaPackets := flow.Packets - base.Packets
+		deltaBytes := flow.Bytes - base.Bytes
+		detail := fmt.Sprintf("delta %ds", duration)
+		if duration == 0 {
+			deltaPackets = flow.Packets
+			deltaBytes = flow.Bytes
+			detail = "snapshot"
+		}
+		if deltaPackets <= 0 && deltaBytes <= 0 {
+			continue
+		}
+		status := "observed"
+		if !flow.Assured && deltaPackets > 2 {
+			status = "suspect"
+			detail += ", no ASSURED state"
+		}
+		rows = append(rows, flowEntry{
+			Time:    now,
+			Mode:    "passive-" + flow.Proto,
+			Source:  flow.Source,
+			Target:  flow.Target,
+			Port:    strconv.Itoa(flow.Port),
+			Status:  status,
+			Packets: deltaPackets,
+			Bytes:   deltaBytes,
+			Detail:  detail,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Packets == rows[j].Packets {
+			return rows[i].Target < rows[j].Target
+		}
+		return rows[i].Packets > rows[j].Packets
+	})
+	return rows
+}
+
+func flowKey(flow conntrackFlow) string {
+	return fmt.Sprintf("%s\t%s\t%s\t%d", flow.Proto, flow.Source, flow.Target, flow.Port)
+}
+
+func appendFlowResults(path string, rows []flowEntry) error {
+	if path == "" || len(rows) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	for _, row := range rows {
+		if _, err := fmt.Fprintf(file, "%d\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
+			row.Time,
+			cleanTSVField(row.Mode),
+			cleanTSVField(row.Source),
+			cleanTSVField(row.Target),
+			cleanTSVField(row.Port),
+			cleanTSVField(row.Status),
+			row.Packets,
+			row.Bytes,
+			cleanTSVField(row.Detail),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func cmdDetector(cfg config, args []string) error {
 	run := newDetectorRun(cfg, args)
 	return run.run()
@@ -870,9 +1161,7 @@ func (d *detectorRun) runNetCheck() {
 func (d *detectorRun) runFlowCheck() {
 	d.writeStatus("running", fmt.Sprintf("Пассивное наблюдение conntrack %d с", d.duration), "")
 	mark := time.Now().Unix()
-	if d.cfg.FlowProbeBin != "" {
-		_ = exec.Command(d.cfg.FlowProbeBin, strconv.Itoa(d.duration)).Run()
-	}
+	_ = cmdFlowProbe(d.cfg, []string{strconv.Itoa(d.duration)})
 	rows, err := readFlowEntries(d.cfg.FlowResults, d.source, 0)
 	if err != nil {
 		d.appendHistory("flow", "error", "-", err.Error())
@@ -956,7 +1245,7 @@ func cmdServe(cfg config, args []string) error {
 		if args[0] == "" {
 			args[0] = "quick"
 		}
-		cmdArgs := append([]string{"detector"}, args...)
+		cmdArgs := detectorCommandArgs(cfg, args)
 		cmd := exec.Command(cfg.DetectorBin, cmdArgs...)
 		if err := cmd.Start(); err != nil {
 			writeJSON(w, nil, err)
@@ -975,6 +1264,13 @@ func cmdServe(cfg config, args []string) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return server.ListenAndServe()
+}
+
+func detectorCommandArgs(cfg config, args []string) []string {
+	if filepath.Base(cfg.DetectorBin) == "sitewatch-detector" {
+		return args
+	}
+	return append([]string{"detector"}, args...)
 }
 
 func serveUDPReflector(listen string) error {

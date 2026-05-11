@@ -132,6 +132,48 @@ func TestReadFlowEntriesAndDetectorHistory(t *testing.T) {
 	}
 }
 
+func TestParsePortRanges(t *testing.T) {
+	got := parsePortRanges("50000-65535 3478,443 443 bad 70000")
+	if len(got) != 3 {
+		t.Fatalf("len(ranges) = %d, want 3: %+v", len(got), got)
+	}
+	if !portInRanges(55000, got) || !portInRanges(3478, got) || portInRanges(80, got) {
+		t.Fatalf("unexpected range matching: %+v", got)
+	}
+}
+
+func TestParseConntrackLineAndDiff(t *testing.T) {
+	cfg := config{
+		FlowUDPPorts: parsePortRanges("50000-65535 3478 443"),
+		FlowTCPPorts: parsePortRanges("443 50000-65535"),
+	}
+	line := "ipv4 2 udp 17 29 src=192.168.50.80 dst=1.2.3.4 sport=51000 dport=55000 packets=5 bytes=600 [UNREPLIED] src=1.2.3.4 dst=192.168.50.80 sport=55000 dport=51000 packets=0 bytes=0 mark=0 use=1"
+	flow, ok := parseConntrackLine(cfg, line)
+	if !ok {
+		t.Fatalf("parseConntrackLine() rejected sample")
+	}
+	if flow.Proto != "udp" || flow.Source != "192.168.50.80" || flow.Target != "1.2.3.4" || flow.Port != 55000 || flow.Assured {
+		t.Fatalf("flow = %+v", flow)
+	}
+	rows := diffFlowSnapshots(nil, []conntrackFlow{flow}, 0, 1778505297)
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1: %+v", len(rows), rows)
+	}
+	if rows[0].Status != "suspect" || rows[0].Packets != 5 || !strings.Contains(rows[0].Detail, "no ASSURED") {
+		t.Fatalf("row = %+v", rows[0])
+	}
+}
+
+func TestDetectorCommandArgsSupportsWrapper(t *testing.T) {
+	args := []string{"quick"}
+	if got := detectorCommandArgs(config{DetectorBin: "/usr/bin/sitewatch"}, args); len(got) != 2 || got[0] != "detector" {
+		t.Fatalf("native args = %+v", got)
+	}
+	if got := detectorCommandArgs(config{DetectorBin: "/usr/bin/sitewatch-detector"}, args); len(got) != 1 || got[0] != "quick" {
+		t.Fatalf("wrapper args = %+v", got)
+	}
+}
+
 func TestDetectorMissingURLWritesHistory(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config{
