@@ -3,6 +3,7 @@ param(
         "files/www/cgi-bin/sitewatch",
         "files/usr/bin/sitewatch-collect",
         "files/usr/bin/sitewatch-check-url",
+        "files/usr/bin/sitewatch-detector",
         "README.md"
     )
 )

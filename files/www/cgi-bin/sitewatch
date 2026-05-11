@@ -42,6 +42,9 @@ CONF="/etc/sitewatch/sitewatch.conf"
 : "${SITEWATCH_AGENT_CHECK_STATUS:=/tmp/sitewatch-agent-check.status}"
 : "${SITEWATCH_NET_RESULTS:=/etc/sitewatch/net-probes.tsv}"
 : "${SITEWATCH_FLOW_RESULTS:=/etc/sitewatch/flow-probes.tsv}"
+: "${SITEWATCH_DETECTOR_BIN:=/usr/bin/sitewatch-detector}"
+: "${SITEWATCH_DETECTOR_STATUS:=/tmp/sitewatch-detector.status}"
+: "${SITEWATCH_DETECTOR_HISTORY:=/etc/sitewatch/detector-history.tsv}"
 : "${SITEWATCH_PROBE_TARGET:=}"
 : "${SITEWATCH_PROBE_PORTS:=3478,443,50000,55000,60000,65000}"
 : "${SITEWATCH_PROBE_MODE:=both}"
@@ -105,7 +108,7 @@ normalize_run_mode() {
 
 normalize_tab() {
 	case "$1" in
-		overview|domains|network|manual|settings|diagnostics) printf "%s" "$1" ;;
+		overview|domains|network|manual|detector|settings|diagnostics) printf "%s" "$1" ;;
 		*) printf "overview" ;;
 	esac
 }
@@ -665,6 +668,63 @@ print_network_report_rows() {
 	done
 }
 
+detector_profile_label() {
+	case "$1" in
+		quick) echo "Быстрая проверка" ;;
+		site) echo "Проблемный сайт" ;;
+		discord) echo "Discord / голос" ;;
+		full) echo "Полная диагностика" ;;
+		*) echo "${1:-не задан}" ;;
+	esac
+}
+
+detector_kind_label() {
+	case "$1" in
+		site) echo "Сайт" ;;
+		net) echo "Активная сеть" ;;
+		flow) echo "Пассивный трафик" ;;
+		summary) echo "Итог" ;;
+		error) echo "Ошибка" ;;
+		*) echo "${1:-событие}" ;;
+	esac
+}
+
+print_detector_history_rows() {
+	[ -f "$SITEWATCH_DETECTOR_HISTORY" ] || {
+		printf '<tr><td class="empty" colspan="7">История детектора пока пустая.</td></tr>\n'
+		return 0
+	}
+	rows="$(sort -t "	" -k2,2nr "$SITEWATCH_DETECTOR_HISTORY" 2>/dev/null | head -n 40)"
+	if [ -z "$rows" ]; then
+		printf '<tr><td class="empty" colspan="7">История детектора пока пустая.</td></tr>\n'
+		return 0
+	fi
+	printf "%s\n" "$rows" | while IFS="$(printf '\t')" read -r run_id ts profile target kind status detail source; do
+		[ -n "$run_id" ] || continue
+		ts_h="$(date -d "@$ts" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$ts")"
+		profile_text="$(detector_profile_label "$profile")"
+		kind_text="$(detector_kind_label "$kind")"
+		if [ "$kind" = "site" ]; then
+			status_text="$(status_label "$status")"
+		else
+			status_text="$(network_status_label "$status")"
+		fi
+		case "$kind:$status" in
+			site:blocked|site:slow|*:suspect|*:timeout|*:error|*:failed|*:not_available) status_class="$status" ;;
+			*) status_class="$status" ;;
+		esac
+		printf '<tr><td class="muted">%s</td><td class="source">%s</td><td>%s</td><td>%s</td><td class="source">%s</td><td><span class="status %s">%s</span></td><td class="muted">%s</td></tr>\n' \
+			"$(printf "%s" "$ts_h" | html_escape)" \
+			"$(printf "%s" "${source:-Все}" | html_escape)" \
+			"$(printf "%s" "$profile_text" | html_escape)" \
+			"$(printf "%s" "$kind_text" | html_escape)" \
+			"$(printf "%s" "$target" | html_escape)" \
+			"$(printf "%s" "$status_class" | html_escape)" \
+			"$(printf "%s" "$status_text" | html_escape)" \
+			"$(printf "%s" "$detail" | html_escape)"
+	done
+}
+
 print_network_export() {
 	status_filter="$1"
 	mode="$2"
@@ -729,6 +789,14 @@ case "$probe_mode" in udp|tcp|both) ;; *) probe_mode="$SITEWATCH_PROBE_MODE" ;; 
 probe_ports="$(printf "%s" "$(safe_token "$(param probe_ports)")" | sed 's/[^0-9,]//g')"
 [ -n "$probe_ports" ] || probe_ports="$SITEWATCH_PROBE_PORTS"
 flow_duration="$(normalize_int_range "$(safe_token "$(param flow_duration)")" 0 300 45)"
+detector_profile="$(safe_token "$(param detector_profile)")"
+case "$detector_profile" in quick|site|discord|full) ;; *) detector_profile="quick" ;; esac
+detector_url="$(url_decode_light "$(param detector_url)")"
+detector_source="$(safe_token "$(param detector_source)")"
+detector_target="$(normalize_container_addr "$(url_decode_light "$(param detector_target)")")"
+detector_ports="$(printf "%s" "$(safe_token "$(param detector_ports)")" | sed 's/[^0-9,]//g')"
+[ -n "$detector_ports" ] || detector_ports="$SITEWATCH_PROBE_PORTS"
+detector_duration="$(normalize_int_range "$(safe_token "$(param detector_duration)")" 0 300 45)"
 dns_source="$(safe_token "$(param dns_source)")"
 case "$dns_source" in auto|dnsmasq|packet|both) ;; *) dns_source="$SITEWATCH_DNS_SOURCE" ;; esac
 case "$dns_source" in auto|dnsmasq|packet|both) ;; *) dns_source="auto" ;; esac
@@ -791,6 +859,16 @@ case "$action" in
 	flow_probe)
 		"$SITEWATCH_FLOW_PROBE_BIN" "$flow_duration" >/dev/null 2>&1 || true
 		redirect_clean diagnostics
+		;;
+	detector_start)
+		"$SITEWATCH_DETECTOR_BIN" "$detector_profile" "$detector_url" "$detector_target" "$detector_ports" "$detector_duration" "$detector_source" >/dev/null 2>&1 &
+		sleep 1
+		redirect_clean detector
+		;;
+	detector_clear)
+		: > "$SITEWATCH_DETECTOR_HISTORY"
+		rm -f "$SITEWATCH_DETECTOR_STATUS"
+		redirect_clean detector
 		;;
 	save_settings)
 		save_config_value SITEWATCH_SCAN_WORKERS "$scan_workers"
@@ -884,6 +962,12 @@ case "$action" in
 		proxy_status_count="0"
 		[ -f "$SITEWATCH_PROXY_OUT" ] && proxy_status_count="$(wc -l < "$SITEWATCH_PROXY_OUT" 2>/dev/null || echo 0)"
 		printf "proxy=%s\n" "$proxy_status_count"
+		printf "detector=%s\n" "$(cat "$SITEWATCH_DETECTOR_STATUS" 2>/dev/null || true)"
+		exit 0
+		;;
+	detector_status)
+		printf "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+		cat "$SITEWATCH_DETECTOR_STATUS" 2>/dev/null || true
 		exit 0
 		;;
 	metrics)
@@ -1148,6 +1232,52 @@ case "$SITEWATCH_PROBE_MODE" in
 	tcp) probe_tcp_selected="selected" ;;
 	*) probe_both_selected="selected" ;;
 esac
+detector_status_raw="$(cat "$SITEWATCH_DETECTOR_STATUS" 2>/dev/null || true)"
+detector_state="$(printf "%s" "$detector_status_raw" | awk -F '\t' '{print $1}')"
+detector_started="$(printf "%s" "$detector_status_raw" | awk -F '\t' '{print $2}')"
+detector_total="$(printf "%s" "$detector_status_raw" | awk -F '\t' '{print $3}')"
+detector_done="$(printf "%s" "$detector_status_raw" | awk -F '\t' '{print $4}')"
+detector_current="$(printf "%s" "$detector_status_raw" | awk -F '\t' '{print $5}')"
+detector_updated="$(printf "%s" "$detector_status_raw" | awk -F '\t' '{print $6}')"
+detector_status_profile="$(printf "%s" "$detector_status_raw" | awk -F '\t' '{print $7}')"
+detector_summary="$(printf "%s" "$detector_status_raw" | awk -F '\t' '{print $8}')"
+[ -n "$detector_state" ] || detector_state="idle"
+[ -n "$detector_total" ] || detector_total="0"
+[ -n "$detector_done" ] || detector_done="0"
+detector_percent="0"
+if [ "${detector_total:-0}" -gt 0 ] 2>/dev/null; then
+	detector_percent=$((detector_done * 100 / detector_total))
+	[ "$detector_percent" -lt 0 ] && detector_percent=0
+	[ "$detector_percent" -gt 100 ] && detector_percent=100
+fi
+detector_state_text="ожидает"
+[ "$detector_state" = "running" ] && detector_state_text="идет"
+[ "$detector_state" = "done" ] && detector_state_text="завершено"
+[ "$detector_state" = "error" ] && detector_state_text="ошибка"
+if [ -n "$detector_status_profile" ]; then
+	detector_profile_label_text="$(detector_profile_label "$detector_status_profile")"
+else
+	detector_profile_label_text="не запускался"
+fi
+detector_current_e="$(printf "%s" "$detector_current" | html_escape)"
+detector_summary_e="$(printf "%s" "$detector_summary" | html_escape)"
+detector_state_text_e="$(printf "%s" "$detector_state_text" | html_escape)"
+detector_profile_label_e="$(printf "%s" "$detector_profile_label_text" | html_escape)"
+detector_url_e="$(printf "%s" "$detector_url" | html_escape)"
+detector_source_e="$(printf "%s" "${detector_source:-$source_filter}" | html_escape)"
+detector_target_e="$(printf "%s" "${detector_target:-$SITEWATCH_PROBE_TARGET}" | html_escape)"
+detector_ports_e="$(printf "%s" "${detector_ports:-$SITEWATCH_PROBE_PORTS}" | html_escape)"
+detector_duration_e="$(printf "%s" "$detector_duration" | html_escape)"
+detector_quick_selected=""
+detector_site_selected=""
+detector_discord_selected=""
+detector_full_selected=""
+case "$detector_profile" in
+	site) detector_site_selected="selected" ;;
+	discord) detector_discord_selected="selected" ;;
+	full) detector_full_selected="selected" ;;
+	*) detector_quick_selected="selected" ;;
+esac
 dns_source_auto_selected=""
 dns_source_dnsmasq_selected=""
 dns_source_packet_selected=""
@@ -1282,12 +1412,14 @@ overview_active=""
 domains_active=""
 network_active=""
 manual_active=""
+detector_active=""
 settings_active=""
 diagnostics_active=""
 case "$active_tab" in
 	domains) domains_active=" active" ;;
 	network) network_active=" active" ;;
 	manual) manual_active=" active" ;;
+	detector) detector_active=" active" ;;
 	settings) settings_active=" active" ;;
 	diagnostics) diagnostics_active=" active" ;;
 	*) overview_active=" active" ;;
@@ -1400,7 +1532,7 @@ h1{font-size:25px;line-height:1.1;margin:0}.subtitle{color:var(--muted);margin-t
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 16px 36px rgba(20,35,55,.07)}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}.panel-title{font-weight:800}.hint{color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:middle}th{background:#f8fafc;color:#3b4656;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}tbody tr:hover{background:#fbfdff}
 th.sortable{cursor:pointer;user-select:none}.sort-indicator{color:var(--muted);font-size:11px;margin-left:4px}
-.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}.status.suspect{background:#fff3cf;color:var(--amber)}.status.observed{background:#e7f4ea;color:var(--green)}.status.timeout,.status.error,.status.failed,.status.not_available{background:#fde8eb;color:var(--red)}
+.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:12px;white-space:nowrap}.status.blocked{background:#fde8eb;color:var(--red)}.status.slow{background:#fff3cf;color:var(--amber)}.status.ok,.status.done{background:#e7f4ea;color:var(--green)}.status.proxy_failed{background:#eceff3;color:var(--gray)}.status.unchecked{background:#eef1f5;color:#596273}.status.suspect{background:#fff3cf;color:var(--amber)}.status.observed{background:#e7f4ea;color:var(--green)}.status.timeout,.status.error,.status.failed,.status.not_available{background:#fde8eb;color:var(--red)}
 .domain{font-weight:750}.source,.metric{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.muted{color:var(--muted)}.empty{padding:28px;text-align:center;color:var(--muted)}
 .dpi-tag{border:1px solid var(--line);border-radius:999px;padding:3px 7px;color:var(--muted);font-size:12px;font-weight:800;white-space:nowrap}
 .dpi-tag.detected{border-color:#d99000;color:#d99000;background:rgba(217,144,0,.08)}
@@ -1426,7 +1558,7 @@ button.button{font:inherit;cursor:pointer}
 :root[data-theme="dark"] tbody tr:hover{background:#192332}
 :root[data-theme="dark"] .status.blocked{background:#3a1b24;color:#ff8994}
 :root[data-theme="dark"] .status.slow{background:#332713;color:#ffd37a}
-:root[data-theme="dark"] .status.ok{background:#173322;color:#6ee092}
+:root[data-theme="dark"] .status.ok,:root[data-theme="dark"] .status.done{background:#173322;color:#6ee092}
 :root[data-theme="dark"] .status.proxy_failed{background:#27303d;color:#b4bfcd}
 :root[data-theme="dark"] .status.unchecked{background:#202a37;color:#aab4c4}
 :root[data-theme="dark"] .status.suspect{background:#332713;color:#ffd37a}:root[data-theme="dark"] .status.observed{background:#173322;color:#6ee092}:root[data-theme="dark"] .status.timeout,:root[data-theme="dark"] .status.error,:root[data-theme="dark"] .status.failed,:root[data-theme="dark"] .status.not_available{background:#3a1b24;color:#ff8994}
@@ -1453,6 +1585,7 @@ button.button{font:inherit;cursor:pointer}
 <button class="tab-button$domains_active agent-hidden" type="button" data-tab="domains">Домены</button>
 <button class="tab-button$network_active agent-hidden" type="button" data-tab="network">Сеть</button>
 <button class="tab-button$manual_active agent-hidden" type="button" data-tab="manual">Проверка URL</button>
+<button class="tab-button$detector_active agent-hidden" type="button" data-tab="detector">Детектор</button>
 <button class="tab-button$settings_active" type="button" data-tab="settings">Настройки</button>
 <button class="tab-button$diagnostics_active agent-hidden" type="button" data-tab="diagnostics">Диагностика</button>
 </nav>
@@ -1621,6 +1754,49 @@ fi
 
 cat <<EOF
 </div>
+</section>
+</section>
+
+<section class="tab-panel$detector_active" data-tab-panel="detector">
+<section class="source-panel">
+<div class="panel-head"><div><div class="tool-title">Детектор DPI</div><div class="muted">Профильная диагностика без постоянного логирования: DNS, сайт, TCP/UDP и пассивный трафик.</div></div><a class="button danger" href="?action=detector_clear&tab=detector" data-confirm="Очистить историю детектора?">Очистить историю</a></div>
+<form class="settings-form" method="get" action="">
+<input type="hidden" name="action" value="detector_start">
+<input type="hidden" name="tab" value="detector">
+<label>Профиль
+<select name="detector_profile">
+<option value="quick" $detector_quick_selected>Быстрая проверка</option>
+<option value="site" $detector_site_selected>Проблемный сайт</option>
+<option value="discord" $detector_discord_selected>Discord / голос</option>
+<option value="full" $detector_full_selected>Полная диагностика</option>
+</select>
+</label>
+<label>URL / домен <input type="text" name="detector_url" value="$detector_url_e" placeholder="https://youmagine.com/"></label>
+<label>Источник <input type="text" name="detector_source" value="$detector_source_e" placeholder="192.168.50.80"></label>
+<label>Цель UDP/TCP <input type="text" name="detector_target" value="$detector_target_e" placeholder="discord.com или IP"></label>
+<label>Порты <input type="text" name="detector_ports" value="$detector_ports_e" placeholder="3478,443,50000,55000,60000,65000"></label>
+<label>Окно, сек <input type="number" name="detector_duration" min="0" max="300" step="5" value="$detector_duration_e"></label>
+<button class="button primary" type="submit">Запустить детектор</button>
+</form>
+</section>
+
+<section class="scan-progress" id="detectorProgress" data-state="$detector_state" data-total="$detector_total" data-done="$detector_done">
+<div>
+<div class="scan-text" id="detectorText">Детектор: $detector_state_text_e · $detector_done из $detector_total · $detector_profile_label_e</div>
+<div class="scan-current" id="detectorCurrent">$detector_current_e</div>
+<div class="muted" id="detectorSummary">$detector_summary_e</div>
+</div>
+<span class="live-tag" id="detectorMode">$detector_state</span>
+<div class="bar"><span id="detectorBar" style="width:${detector_percent}%"></span></div>
+</section>
+
+<section class="source-panel">
+<div class="tool-title">История детектора</div>
+<table><thead><tr><th>Время</th><th>Источник</th><th>Профиль</th><th>Проверка</th><th>Цель</th><th>Статус</th><th>Детали</th></tr></thead><tbody>
+EOF
+print_detector_history_rows
+cat <<EOF
+</tbody></table>
 </section>
 </section>
 
@@ -1944,6 +2120,12 @@ cat <<'EOF'
   var scanCurrent = document.getElementById('scanCurrent');
   var scanMode = document.getElementById('scanMode');
   var scanBar = document.getElementById('scanBar');
+  var detectorProgress = document.getElementById('detectorProgress');
+  var detectorText = document.getElementById('detectorText');
+  var detectorCurrent = document.getElementById('detectorCurrent');
+  var detectorSummary = document.getElementById('detectorSummary');
+  var detectorMode = document.getElementById('detectorMode');
+  var detectorBar = document.getElementById('detectorBar');
   var scanWorkersInput = document.querySelector('input[name="scan_workers"]');
   var source = '$source_filter_e';
   window.sitewatchPending = '$unchecked_count';
@@ -2025,6 +2207,34 @@ cat <<'EOF'
       scanBar.style.width = pct + '%';
     }
   }
+  function detectorProfileLabel(profile){
+    if (profile === 'quick') return 'Быстрая проверка';
+    if (profile === 'site') return 'Проблемный сайт';
+    if (profile === 'discord') return 'Discord / голос';
+    if (profile === 'full') return 'Полная диагностика';
+    return profile || 'не запускался';
+  }
+  function setDetector(raw){
+    if (!detectorProgress) return;
+    var parts = raw ? raw.split('\t') : [];
+    var state = parts[0] || 'idle';
+    var total = parseInt(parts[2] || '0', 10);
+    var done = parseInt(parts[3] || '0', 10);
+    var current = parts[4] || '';
+    var profile = parts[6] || '';
+    var summary = parts[7] || '';
+    detectorProgress.setAttribute('data-state', state);
+    detectorProgress.setAttribute('data-total', total || 0);
+    detectorProgress.setAttribute('data-done', done || 0);
+    if (detectorMode) detectorMode.textContent = modeLabels[state] || state || 'ожидает';
+    if (detectorCurrent) detectorCurrent.textContent = current ? 'Сейчас: ' + current : '';
+    if (detectorSummary) detectorSummary.textContent = summary;
+    if (detectorText) detectorText.textContent = 'Детектор: ' + (modeLabels[state] || state || 'ожидает') + ' · ' + done + ' из ' + total + ' · ' + detectorProfileLabel(profile);
+    if (detectorBar) {
+      var pct = total > 0 ? Math.max(0, Math.min(100, Math.round(done * 100 / total))) : 0;
+      detectorBar.style.width = pct + '%';
+    }
+  }
   function render(){
     if (!banner || !timer || !mode) return;
     var state = banner.getAttribute('data-state') || 'idle';
@@ -2048,6 +2258,7 @@ cat <<'EOF'
   }
   render();
   setScan(scanProgress ? [scanProgress.getAttribute('data-state') || '', '', scanProgress.getAttribute('data-total') || '0', scanProgress.getAttribute('data-done') || '0', scanCurrent ? scanCurrent.textContent : ''].join('\t') : '');
+  setDetector(detectorProgress ? [detectorProgress.getAttribute('data-state') || '', '', detectorProgress.getAttribute('data-total') || '0', detectorProgress.getAttribute('data-done') || '0', detectorCurrent ? detectorCurrent.textContent : '', '', ''].join('\t') : '');
   setInterval(render, 1000);
   function refreshStatus(){
     if (!banner) return;
@@ -2056,6 +2267,7 @@ cat <<'EOF'
         var data = parseStatus(text);
         if (data.capture) setCapture(data.capture);
         if (data.scan) setScan(data.scan);
+        if (data.detector) setDetector(data.detector);
         if (data.seen && seen) seen.textContent = data.seen;
         if (data.results && results) results.textContent = data.results;
         if (data.proxy && proxyTotal) proxyTotal.textContent = data.proxy;

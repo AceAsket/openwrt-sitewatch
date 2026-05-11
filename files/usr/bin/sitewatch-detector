@@ -1,0 +1,155 @@
+#!/bin/ash
+set -eu
+
+CONF="/etc/sitewatch/sitewatch.conf"
+[ -f "$CONF" ] && . "$CONF"
+
+: "${SITEWATCH_CHECK_URL_BIN:=/usr/bin/sitewatch-check-url}"
+: "${SITEWATCH_NET_PROBE_BIN:=/usr/bin/sitewatch-net-probe}"
+: "${SITEWATCH_FLOW_PROBE_BIN:=/usr/bin/sitewatch-flow-probe}"
+: "${SITEWATCH_NET_RESULTS:=/etc/sitewatch/net-probes.tsv}"
+: "${SITEWATCH_FLOW_RESULTS:=/etc/sitewatch/flow-probes.tsv}"
+: "${SITEWATCH_DETECTOR_STATUS:=/tmp/sitewatch-detector.status}"
+: "${SITEWATCH_DETECTOR_HISTORY:=/etc/sitewatch/detector-history.tsv}"
+: "${SITEWATCH_PROBE_TARGET:=}"
+: "${SITEWATCH_PROBE_PORTS:=3478,443,50000,55000,60000,65000}"
+
+profile="${1:-quick}"
+url="${2:-}"
+target="${3:-}"
+ports="${4:-$SITEWATCH_PROBE_PORTS}"
+duration="${5:-45}"
+source="${6:-}"
+
+case "$profile" in quick|site|discord|full) ;; *) profile="quick" ;; esac
+case "$duration" in ""|*[!0-9]*) duration=45 ;; esac
+[ "$duration" -gt 300 ] && duration=300
+[ -n "$target" ] || target="$SITEWATCH_PROBE_TARGET"
+[ -n "$ports" ] || ports="$SITEWATCH_PROBE_PORTS"
+
+run_id="$(date +%s)-$$"
+started="$(date +%s)"
+done_count=0
+total=0
+
+case "$profile" in
+	quick|site)
+		[ -n "$url" ] && total=$((total + 1))
+		;;
+	discord)
+		[ -n "$target" ] && total=$((total + 1))
+		total=$((total + 1))
+		;;
+	full)
+		[ -n "$url" ] && total=$((total + 1))
+		[ -n "$target" ] && total=$((total + 1))
+		total=$((total + 1))
+		;;
+esac
+[ "$total" -gt 0 ] || total=1
+
+mkdir -p "$(dirname "$SITEWATCH_DETECTOR_HISTORY")" "$(dirname "$SITEWATCH_DETECTOR_STATUS")"
+touch "$SITEWATCH_DETECTOR_HISTORY"
+
+clean_field() {
+	printf "%s" "$1" | tr '\t\r\n' '   ' | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//'
+}
+
+write_status() {
+	state="$1"
+	current="$2"
+	summary="$3"
+	now="$(date +%s)"
+	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+		"$state" "$started" "$total" "$done_count" "$(clean_field "$current")" "$now" "$profile" "$(clean_field "$summary")" > "$SITEWATCH_DETECTOR_STATUS"
+}
+
+append_history() {
+	kind="$1"
+	status="$2"
+	item="$3"
+	detail="$4"
+	now="$(date +%s)"
+	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+		"$run_id" "$now" "$profile" "$(clean_field "$item")" "$kind" "$(clean_field "$status")" "$(clean_field "$detail")" "$(clean_field "$source")" >> "$SITEWATCH_DETECTOR_HISTORY"
+}
+
+run_site_check() {
+	[ -n "$url" ] || {
+		append_history error error "-" "URL не задан"
+		return 0
+	}
+	write_status running "Проверка сайта $url" ""
+	out="$("$SITEWATCH_CHECK_URL_BIN" "$url" 2>/dev/null || true)"
+	status="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "status" { print $2; exit }')"
+	domain="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "domain" { print $2; exit }')"
+	direct_code="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "direct_code" { print $2; exit }')"
+	direct_time="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "direct_time" { print $2; exit }')"
+	proxy_code="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "proxy_code" { print $2; exit }')"
+	proxy_time="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "proxy_time" { print $2; exit }')"
+	dns_status="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "dns_status" { print $2; exit }')"
+	tls13="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "tls13_status" { print $2; exit }')"
+	tls12="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "tls12_status" { print $2; exit }')"
+	http_status="$(printf "%s\n" "$out" | awk -F '\t' '$1 == "http_status" { print $2; exit }')"
+	[ -n "$status" ] || status="error"
+	[ -n "$domain" ] || domain="$url"
+	detail="direct ${direct_code:-000}/${direct_time:-0}s; proxy ${proxy_code:-000}/${proxy_time:-0}s"
+	[ -n "$dns_status" ] && detail="$detail; DNS $dns_status"
+	[ -n "$tls13" ] && detail="$detail; TLS1.3 $tls13"
+	[ -n "$tls12" ] && detail="$detail; TLS1.2 $tls12"
+	[ -n "$http_status" ] && detail="$detail; HTTP $http_status"
+	append_history site "$status" "$domain" "$detail"
+}
+
+run_net_check() {
+	[ -n "$target" ] || {
+		append_history error error "-" "Цель UDP/TCP не задана"
+		return 0
+	}
+	write_status running "Активная UDP/TCP проверка $target" ""
+	mark="$(date +%s)"
+	"$SITEWATCH_NET_PROBE_BIN" both "$target" "$ports" >/dev/null 2>&1 || true
+	awk -F '\t' -v mark="$mark" '$1 >= mark && NF >= 7 { print }' "$SITEWATCH_NET_RESULTS" 2>/dev/null | tail -n 12 | while IFS="$(printf '\t')" read -r ts mode item port status rtt detail; do
+		append_history net "$status" "$item:$port" "$mode; rtt ${rtt}s; $detail"
+	done
+}
+
+run_flow_check() {
+	write_status running "Пассивное наблюдение conntrack ${duration} с" ""
+	mark="$(date +%s)"
+	"$SITEWATCH_FLOW_PROBE_BIN" "$duration" >/dev/null 2>&1 || true
+	awk -F '\t' -v mark="$mark" -v source_filter="$source" 'NF >= 9 && $1 >= mark && (source_filter == "" || $3 == source_filter) { print }' "$SITEWATCH_FLOW_RESULTS" 2>/dev/null | tail -n 18 | while IFS="$(printf '\t')" read -r ts mode src dst port status packets bytes detail; do
+		append_history flow "$status" "$dst:$port" "$mode; $src; packets $packets; bytes $bytes; $detail"
+	done
+}
+
+write_status running "Старт" ""
+
+case "$profile" in
+	quick|site)
+		run_site_check
+		done_count=$((done_count + 1))
+		;;
+	discord)
+		run_net_check
+		done_count=$((done_count + 1))
+		run_flow_check
+		done_count=$((done_count + 1))
+		;;
+	full)
+		if [ -n "$url" ]; then
+			run_site_check
+			done_count=$((done_count + 1))
+		fi
+		if [ -n "$target" ]; then
+			run_net_check
+			done_count=$((done_count + 1))
+		fi
+		run_flow_check
+		done_count=$((done_count + 1))
+		;;
+esac
+
+append_history summary done "${url:-${target:-проверка}}" "Профиль завершен"
+done_count="$total"
+write_status done "Готово" "Профиль завершен, результаты сохранены в истории"
